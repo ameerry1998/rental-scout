@@ -50,7 +50,7 @@ CRAIGSLIST_ACTOR = os.environ.get("CRAIGSLIST_ACTOR", "easyapi/craigslist-search
 ZILLOW_ACTOR = os.environ.get("ZILLOW_ACTOR", "crawlerbros/zillow-scraper")
 APARTMENTS_ACTOR = os.environ.get("APARTMENTS_ACTOR", "tri_angle/real-estate-aggregator")
 REALTOR_ACTOR = os.environ.get("REALTOR_ACTOR", "crawlerbros/realtor-scraper")
-FACEBOOK_ACTOR = os.environ.get("FACEBOOK_ACTOR", "webdatalabs/facebook-marketplace-deal-finder")
+FACEBOOK_ACTOR = os.environ.get("FACEBOOK_ACTOR", "apify/facebook-marketplace-scraper")
 RENT_ACTOR = os.environ.get("RENT_ACTOR", "benthepythondev/rent-com-scraper")
 
 # --- Enable/disable scrapers ---

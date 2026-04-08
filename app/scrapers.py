@@ -345,27 +345,30 @@ def _transform_realtor(item: dict) -> ScraperResult | None:
 
 
 def _transform_facebook(item: dict) -> ScraperResult | None:
-    post_id = item.get("id") or item.get("postId") or ""
-    price_raw = item.get("price") or ""
-    price = _safe_int(
-        str(price_raw).replace("$", "").replace(",", "").replace("/mo", "").strip()
-    )
+    # apify/facebook-marketplace-scraper output shape
+    post_id = item.get("id") or ""
+    price_data = item.get("listing_price", {}) or {}
+    price = _safe_int(price_data.get("amount") or price_data.get("formatted_amount", "").replace("$", "").replace(",", ""))
+
+    location = item.get("location", {}) or {}
+    reverse = location.get("reverse_geocode", {}) or {}
+    city = reverse.get("city", "")
+    state = reverse.get("state", "")
+    city_page = reverse.get("city_page", {}) or {}
+    neighborhood = city_page.get("display_name", "") or f"{city}, {state}"
+
+    title = item.get("marketplace_listing_title") or item.get("custom_title") or ""
+    photo = item.get("primary_listing_photo", {}) or {}
 
     return ScraperResult(
         source="facebook",
-        source_id=str(post_id) or _hash_id("facebook", item.get("title", "")),
-        url=item.get("url") or item.get("link", ""),
-        title=item.get("title") or item.get("name", ""),
+        source_id=str(post_id) or _hash_id("facebook", title),
+        url=item.get("listingUrl") or item.get("url", ""),
+        title=title,
         price=price,
-        bedrooms=_safe_float(item.get("bedrooms")),
-        bathrooms=_safe_float(item.get("bathrooms")),
-        sqft=_safe_int(item.get("squareFeet")),
-        address=item.get("location") or item.get("address", ""),
-        neighborhood="",
-        latitude=_safe_float(item.get("latitude")),
-        longitude=_safe_float(item.get("longitude")),
-        description=item.get("description") or item.get("body") or "",
-        images=item.get("images", []) or [],
+        neighborhood=neighborhood,
+        description=title,  # FB listings have minimal description
+        images=[photo.get("photo_image_url", "")] if photo.get("photo_image_url") else [],
         raw_data=item,
     )
 
@@ -422,9 +425,7 @@ def _realtor_input() -> dict:
 
 def _facebook_input() -> dict:
     return {
-        "searchQuery": f"{config.BEDROOMS} bedroom apartment",
-        "location": "Cambridge, Massachusetts",
-        "category": "property_rentals",
+        "startUrls": [{"url": f"https://www.facebook.com/marketplace/boston/propertyrentals?minPrice=0&maxPrice={config.MAX_PRICE}"}],
         "maxItems": 100,
     }
 
