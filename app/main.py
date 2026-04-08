@@ -168,11 +168,17 @@ def _run_source(source: str, db: Session) -> dict:
         }
 
     except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        log.error(f"[{source}] Pipeline failed: {e}")
+        log.error(f"[{source}] {error_detail}")
         run.status = "failed"
         run.error = str(e)
         run.completed_at = datetime.now(timezone.utc)
-        db.commit()
-        log.exception(f"[{source}] Pipeline failed")
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
         return {"source": source, "status": "failed", "error": str(e)}
 
 
