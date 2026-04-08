@@ -164,23 +164,41 @@ function runRescore() {
           </span>
           {% endif %}
         </div>
-        <div class="flex items-center gap-4 mt-1 text-sm text-gray-500">
+
+        <!-- Key info row: price, neighborhood/city, availability -->
+        <div class="flex items-center gap-3 mt-1.5 flex-wrap">
           {% if listing.price %}
-          <span class="font-medium text-gray-900">${{ '{:,}'.format(listing.price) }}/mo</span>
+          <span class="text-base font-semibold text-gray-900">${{ '{:,}'.format(listing.price) }}/mo</span>
           {% endif %}
-          {% if listing.bedrooms %}<span>{{ listing.bedrooms | int }}bd</span>{% endif %}
-          {% if listing.bathrooms %}<span>{{ listing.bathrooms | int }}ba</span>{% endif %}
-          {% if listing.sqft %}<span>{{ '{:,}'.format(listing.sqft) }}sqft</span>{% endif %}
-          {% if listing.neighborhood %}<span>{{ listing.neighborhood }}</span>{% endif %}
+          {% if listing.neighborhood %}
+          <span class="text-sm font-medium px-2 py-0.5 rounded
+            {{ 'bg-emerald-100 text-emerald-800' if 'cambridge' in listing.neighborhood.lower() else
+               'bg-amber-100 text-amber-800' if 'somerville' in listing.neighborhood.lower() else
+               'bg-gray-100 text-gray-600' }}">
+            {{ listing.neighborhood }}
+          </span>
+          {% endif %}
+          {% if listing.availability_date and listing.availability_date != 'unknown' %}
+          <span class="text-sm font-medium px-2 py-0.5 rounded
+            {{ 'bg-blue-100 text-blue-800' if '09-01' in listing.availability_date or '08-01' in listing.availability_date else
+               'bg-orange-100 text-orange-700' }}">
+            Move-in: {{ listing.availability_date }}
+          </span>
+          {% endif %}
+          {% if listing.bedrooms %}<span class="text-sm text-gray-500">{{ listing.bedrooms | int }}bd</span>{% endif %}
+          {% if listing.bathrooms %}<span class="text-sm text-gray-500">{{ listing.bathrooms | int }}ba</span>{% endif %}
+          {% if listing.sqft %}<span class="text-sm text-gray-500">{{ '{:,}'.format(listing.sqft) }}sqft</span>{% endif %}
         </div>
+
         {% if listing.summary %}
         <p class="text-sm text-gray-600 mt-1 truncate">{{ listing.summary }}</p>
         {% endif %}
-        {% if listing.availability_date and listing.availability_date != 'unknown' %}
+
+        <!-- Contact info -->
+        {% if listing.contact_info %}
         <div class="mt-1">
-          <span class="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700">
-            Available: {{ listing.availability_date }}
-          </span>
+          <span class="text-xs text-gray-500">Contact: </span>
+          <span class="text-xs font-medium text-gray-700">{{ listing.contact_info }}</span>
         </div>
         {% endif %}
       </div>
