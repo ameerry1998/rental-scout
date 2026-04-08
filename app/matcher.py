@@ -2,6 +2,7 @@
 Claude-powered listing matcher and message drafter.
 
 Uses Haiku for fast scoring of every listing, Sonnet for drafting outreach.
+Scoring prompt is editable from the dashboard UI (stored in DB).
 Injects recent user feedback as few-shot examples to improve matching over time.
 """
 from __future__ import annotations
@@ -13,13 +14,13 @@ import anthropic
 from sqlalchemy.orm import Session
 
 from app import config
-from app.models import Listing
+from app.models import Listing, Setting
 
 log = logging.getLogger(__name__)
 
 client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
 
-MATCH_SYSTEM = f"""You are a rental listing analyst. You are scoring listings for {config.RENTER_NAME} who is looking for an apartment.
+DEFAULT_MATCH_PROMPT = f"""You are a rental listing analyst. You are scoring listings for {config.RENTER_NAME} who is looking for an apartment.
 
 HARD REQUIREMENTS (a listing CANNOT score above 5 if any of these fail):
 - Location must be in CAMBRIDGE, MA. This is non-negotiable. Cambridge is the priority.
@@ -57,7 +58,6 @@ Respond with ONLY valid JSON (no markdown fences, no explanation):
   "summary": "<one-sentence summary>"
 }}"""
 
-
 DRAFT_SYSTEM = f"""You are drafting a rental inquiry message from {config.RENTER_NAME}.
 
 RENTER CONTEXT:
@@ -75,8 +75,25 @@ Write a concise, professional inquiry that:
 Return ONLY the message text, no subject line or greeting prefix."""
 
 
+def get_match_prompt(db: Session) -> str:
+    """Get the scoring prompt — from DB if edited, otherwise the default."""
+    row = db.query(Setting).filter_by(key="match_prompt").first()
+    if row and row.value:
+        return row.value
+    return DEFAULT_MATCH_PROMPT
+
+
+def save_match_prompt(db: Session, prompt: str) -> None:
+    """Save an updated scoring prompt to the DB."""
+    row = db.query(Setting).filter_by(key="match_prompt").first()
+    if row:
+        row.value = prompt
+    else:
+        db.add(Setting(key="match_prompt", value=prompt))
+    db.commit()
+
+
 def _get_feedback_examples(db: Session, limit: int = 10) -> str:
-    """Pull recent user feedback to inject as few-shot context."""
     reviewed = (
         db.query(Listing)
         .filter(Listing.feedback.isnot(None))
@@ -117,16 +134,15 @@ def _build_listing_text(listing: Listing) -> str:
     if listing.url:
         parts.append(f"URL: {listing.url}")
     if listing.description:
-        # Truncate very long descriptions to save tokens
         desc = listing.description[:3000]
         parts.append(f"\nFull description:\n{desc}")
     return "\n".join(parts)
 
 
 def score_listing(listing: Listing, db: Session) -> dict:
-    """Score a single listing using Claude. Returns the parsed JSON result."""
     feedback_ctx = _get_feedback_examples(db)
     listing_text = _build_listing_text(listing)
+    system_prompt = get_match_prompt(db)
 
     user_msg = listing_text
     if feedback_ctx:
@@ -136,11 +152,10 @@ def score_listing(listing: Listing, db: Session) -> dict:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=500,
-            system=MATCH_SYSTEM,
+            system=system_prompt,
             messages=[{"role": "user", "content": user_msg}],
         )
         raw = response.content[0].text.strip()
-        # Handle potential markdown wrapping
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
         return json.loads(raw)
@@ -159,7 +174,6 @@ def score_listing(listing: Listing, db: Session) -> dict:
 
 
 def draft_message(listing: Listing) -> str:
-    """Generate a draft outreach message for a matched listing."""
     listing_text = _build_listing_text(listing)
 
     try:
@@ -176,7 +190,6 @@ def draft_message(listing: Listing) -> str:
 
 
 def score_and_update(listing: Listing, db: Session) -> None:
-    """Score a listing and persist the results."""
     result = score_listing(listing, db)
 
     listing.match_score = result.get("score", 0)
@@ -186,11 +199,9 @@ def score_and_update(listing: Listing, db: Session) -> None:
     listing.match_concerns = result.get("concerns", [])
     listing.summary = result.get("summary", "")
 
-    # Extract neighborhood if we didn't have one
     if not listing.neighborhood and result.get("neighborhood"):
         listing.neighborhood = result["neighborhood"]
 
-    # Auto-draft message for strong matches
     if listing.match_score >= 7 and not listing.is_room_share:
         listing.draft_message = draft_message(listing)
 

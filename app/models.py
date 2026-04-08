@@ -70,3 +70,10 @@ class SearchRun(Base):
     matches_found = Column(Integer, default=0)
     status = Column(String(20), default="running")       # running, completed, failed
     error = Column(Text)
+
+
+class Setting(Base):
+    __tablename__ = "settings"
+
+    key = Column(String(100), primary_key=True)
+    value = Column(Text, nullable=False)

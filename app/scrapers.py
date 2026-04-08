@@ -502,70 +502,55 @@ class ApifyScraperDef:
     transform: Callable[[dict], ScraperResult | None]
 
 
-APIFY_SCRAPERS: list[ApifyScraperDef] = [
-    ApifyScraperDef("zillow", config.ZILLOW_ACTOR, config.ENABLE_ZILLOW, _zillow_input, _transform_zillow),
-    ApifyScraperDef("apartments", config.APARTMENTS_ACTOR, config.ENABLE_APARTMENTS, _apartments_input, _transform_aggregator),
-    ApifyScraperDef("realtor", config.REALTOR_ACTOR, config.ENABLE_REALTOR, _realtor_input, _transform_realtor),
-    ApifyScraperDef("redfin", config.REDFIN_ACTOR, config.ENABLE_REDFIN, _redfin_input, _transform_redfin),
-    ApifyScraperDef("facebook", config.FACEBOOK_ACTOR, config.ENABLE_FACEBOOK, _facebook_input, _transform_facebook),
-    ApifyScraperDef("rent", config.RENT_ACTOR, config.ENABLE_RENT, _rent_input, _transform_rent),
-]
+APIFY_SCRAPERS: dict[str, ApifyScraperDef] = {
+    "zillow": ApifyScraperDef("zillow", config.ZILLOW_ACTOR, config.ENABLE_ZILLOW, _zillow_input, _transform_zillow),
+    "apartments": ApifyScraperDef("apartments", config.APARTMENTS_ACTOR, config.ENABLE_APARTMENTS, _apartments_input, _transform_aggregator),
+    "realtor": ApifyScraperDef("realtor", config.REALTOR_ACTOR, config.ENABLE_REALTOR, _realtor_input, _transform_realtor),
+    "redfin": ApifyScraperDef("redfin", config.REDFIN_ACTOR, config.ENABLE_REDFIN, _redfin_input, _transform_redfin),
+    "facebook": ApifyScraperDef("facebook", config.FACEBOOK_ACTOR, config.ENABLE_FACEBOOK, _facebook_input, _transform_facebook),
+    "rent": ApifyScraperDef("rent", config.RENT_ACTOR, config.ENABLE_RENT, _rent_input, _transform_rent),
+}
+
+# All available scraper names (for the dashboard + routes)
+SCRAPER_NAMES: list[str] = ["craigslist"] + list(APIFY_SCRAPERS.keys())
 
 
-def run_all_scrapers(known_ids_by_source: dict[str, set[str]] | None = None) -> list[ScraperResult]:
-    """Run every enabled scraper and return only NEW normalized results.
+def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[ScraperResult]:
+    """Run one platform's scraper and return only NEW results."""
+    known_ids = known_ids or set()
 
-    known_ids_by_source: {"craigslist": {"123", "456"}, "zillow": {"zpid1"}, ...}
-    Listings with these source_ids are skipped entirely — no detail fetches, no transforms.
-    """
-    known = known_ids_by_source or {}
-    all_results: list[ScraperResult] = []
+    if source == "craigslist":
+        if not config.ENABLE_CRAIGSLIST:
+            log.info("Craigslist is disabled")
+            return []
+        return _scrape_craigslist(known_ids=known_ids)
 
-    # 1. Craigslist — direct HTTP scraper (knows how to skip detail fetches)
-    if config.ENABLE_CRAIGSLIST:
-        try:
-            cl_results = _scrape_craigslist(known_ids=known.get("craigslist", set()))
-            all_results.extend(cl_results)
-        except Exception as e:
-            log.error(f"Craigslist scraper failed: {e}")
-    else:
-        log.info("Skipping disabled scraper: craigslist")
+    scraper = APIFY_SCRAPERS.get(source)
+    if not scraper:
+        raise ValueError(f"Unknown source: {source}")
+    if not scraper.enabled:
+        log.info(f"{source} is disabled")
+        return []
 
-    # 2. Apify-based scrapers
     client = ApifyClient(config.APIFY_API_TOKEN)
+    log.info(f"Running {source} (actor: {scraper.actor_id})")
 
-    for scraper in APIFY_SCRAPERS:
-        if not scraper.enabled:
-            log.info(f"Skipping disabled scraper: {scraper.name}")
-            continue
+    actor_input = scraper.build_input()
+    run = client.actor(scraper.actor_id).call(run_input=actor_input)
+    dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
 
-        scraper_known = known.get(scraper.name, set())
-        log.info(f"Running {scraper.name} (actor: {scraper.actor_id})")
+    log.info(f"  {source}: got {len(dataset_items)} raw items")
+    results: list[ScraperResult] = []
+    for item in dataset_items:
         try:
-            actor_input = scraper.build_input()
-            run = client.actor(scraper.actor_id).call(run_input=actor_input)
-            dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
-
-            log.info(f"  {scraper.name}: got {len(dataset_items)} raw items")
-            new_count = 0
-            for item in dataset_items:
-                try:
-                    result = scraper.transform(item)
-                    if not result:
-                        continue
-                    # Skip if we already have this listing
-                    if result.source_id in scraper_known:
-                        continue
-                    all_results.append(result)
-                    new_count += 1
-                except Exception as e:
-                    log.warning(f"  {scraper.name} transform error: {e}")
-                    continue
-            log.info(f"  {scraper.name}: {new_count} new, {len(dataset_items) - new_count} already known")
-
+            result = scraper.transform(item)
+            if not result:
+                continue
+            if result.source_id in known_ids:
+                continue
+            results.append(result)
         except Exception as e:
-            log.error(f"  {scraper.name} actor failed: {e}")
-            continue
+            log.warning(f"  {source} transform error: {e}")
 
-    log.info(f"Total new scraped results: {len(all_results)}")
-    return all_results
+    log.info(f"  {source}: {len(results)} new, {len(dataset_items) - len(results)} skipped")
+    return results

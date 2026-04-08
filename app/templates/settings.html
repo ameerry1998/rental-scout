@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}AI Prompt Settings — Rental Scout{% endblock %}
+
+{% block content %}
+<a href="/" class="text-sm text-gray-500 hover:text-gray-700 mb-4 inline-block">&larr; Back to dashboard</a>
+
+<div class="bg-white rounded-lg border p-6 max-w-4xl">
+  <h1 class="text-lg font-bold text-gray-900 mb-1">AI Scoring Prompt</h1>
+  <p class="text-sm text-gray-500 mb-4">
+    This prompt is sent to Claude for every new listing. Edit it to change how listings are scored.
+    After saving, click "Re-score All" on the dashboard to apply to existing listings.
+  </p>
+
+  {% if saved %}
+  <div class="mb-4 px-4 py-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+    Prompt saved. Go back to the dashboard and click "Re-score All" to apply.
+  </div>
+  {% endif %}
+
+  <form action="/settings/prompt" method="POST">
+    <textarea name="prompt" rows="30"
+              class="w-full font-mono text-sm border rounded-lg px-4 py-3 text-gray-700
+                     focus:outline-none focus:ring-2 focus:ring-blue-500 leading-relaxed">{{ prompt }}</textarea>
+    <div class="flex items-center justify-between mt-4">
+      <span class="text-xs text-gray-400">Changes take effect on the next scoring run or re-score</span>
+      <button type="submit"
+              class="px-6 py-2 bg-blue-600 text-white font-medium rounded hover:bg-blue-500">
+        Save Prompt
+      </button>
+    </div>
+  </form>
+</div>
+{% endblock %}
