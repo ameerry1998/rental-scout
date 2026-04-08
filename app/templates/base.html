@@ -5,37 +5,61 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Rental Scout{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: '#ff385c',
+            'brand-dark': '#e00b41',
+            'near-black': '#222222',
+            'text-secondary': '#6a6a6a',
+            'surface-secondary': '#f2f2f2',
+          },
+          borderRadius: {
+            'card': '20px',
+            'badge': '14px',
+            'btn': '8px',
+          },
+          fontFamily: {
+            sans: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'sans-serif'],
+          },
+          boxShadow: {
+            'card': 'rgba(0,0,0,0.02) 0px 0px 0px 1px, rgba(0,0,0,0.04) 0px 2px 6px, rgba(0,0,0,0.1) 0px 4px 8px',
+            'card-hover': 'rgba(0,0,0,0.04) 0px 0px 0px 1px, rgba(0,0,0,0.08) 0px 4px 12px, rgba(0,0,0,0.14) 0px 8px 16px',
+          },
+        }
+      }
+    }
+  </script>
   <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { color: #222222; }
     .score-green { background: #dcfce7; border-color: #16a34a; color: #15803d; }
     .score-yellow { background: #fef9c3; border-color: #ca8a04; color: #a16207; }
     .score-red { background: #fee2e2; border-color: #dc2626; color: #b91c1c; }
-    .score-gray { background: #f3f4f6; border-color: #9ca3af; color: #6b7280; }
-    .feedback-btn { transition: all 0.15s; }
-    .feedback-btn:hover { transform: scale(1.05); }
-    .feedback-btn.active { ring: 2px; }
+    .score-gray { background: #f7f7f7; border-color: #c1c1c1; color: #6a6a6a; }
   </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-  <nav class="bg-white border-b border-gray-200 px-6 py-4">
-    <div class="max-w-7xl mx-auto flex items-center justify-between">
-      <div class="flex items-center gap-4">
-        <a href="/" class="text-xl font-bold text-gray-900">Rental Scout</a>
-        <a href="/runs" class="text-sm text-gray-500 hover:text-gray-700">Runs</a>
-        <a href="/settings" class="text-sm text-gray-500 hover:text-gray-700">Settings</a>
+<body class="bg-white min-h-screen">
+  <nav class="sticky top-0 z-50 bg-white border-b border-gray-100 px-6 py-4 shadow-sm">
+    <div class="max-w-6xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-6">
+        <a href="/" class="text-xl font-bold text-brand">Rental Scout</a>
+        <a href="/runs" class="text-sm font-medium text-text-secondary hover:text-near-black">Runs</a>
+        <a href="/settings" class="text-sm font-medium text-text-secondary hover:text-near-black">Settings</a>
       </div>
-      <div class="flex items-center gap-4 text-sm text-gray-500">
+      <div class="flex items-center gap-4 text-sm text-text-secondary">
         {% if last_run %}
           <span>Last run: {{ last_run.completed_at.strftime('%b %d, %I:%M %p') if last_run.completed_at else 'running...' }}</span>
           {% if last_run.matches_found is not none %}
-            <span class="text-green-600 font-medium">{{ last_run.matches_found }} matches</span>
+            <span class="font-semibold text-brand">{{ last_run.matches_found }} matches</span>
           {% endif %}
         {% endif %}
       </div>
     </div>
   </nav>
 
-  <main class="max-w-7xl mx-auto px-6 py-6">
+  <main class="max-w-6xl mx-auto px-6 py-8">
     {% block content %}{% endblock %}
   </main>
 </body>

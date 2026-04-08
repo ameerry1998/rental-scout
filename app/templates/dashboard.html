@@ -4,62 +4,62 @@
 {% block content %}
 <!-- Stats bar -->
 {% if stats %}
-<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-  <div class="bg-white rounded-lg border p-4 text-center">
-    <div class="text-2xl font-bold text-gray-900">{{ stats.get('total', 0) }}</div>
-    <div class="text-xs text-gray-500 mt-1">Total Listings</div>
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+  <div class="bg-white rounded-card shadow-card p-5 text-center">
+    <div class="text-3xl font-bold text-near-black">{{ stats.get('total', 0) }}</div>
+    <div class="text-sm text-text-secondary mt-1">Total Listings</div>
   </div>
-  <div class="bg-white rounded-lg border p-4 text-center">
-    <div class="text-2xl font-bold text-green-600">{{ stats.get('matches', 0) }}</div>
-    <div class="text-xs text-gray-500 mt-1">Matches (7+)</div>
+  <div class="bg-white rounded-card shadow-card p-5 text-center">
+    <div class="text-3xl font-bold text-brand">{{ stats.get('matches', 0) }}</div>
+    <div class="text-sm text-text-secondary mt-1">Matches (7+)</div>
   </div>
-  <div class="bg-white rounded-lg border p-4 text-center">
-    <div class="text-2xl font-bold text-yellow-600">{{ stats.get('unreviewed', 0) }}</div>
-    <div class="text-xs text-gray-500 mt-1">Unreviewed</div>
+  <div class="bg-white rounded-card shadow-card p-5 text-center">
+    <div class="text-3xl font-bold text-near-black">{{ stats.get('unreviewed', 0) }}</div>
+    <div class="text-sm text-text-secondary mt-1">Unreviewed</div>
   </div>
-  <div class="bg-white rounded-lg border p-4 text-center">
-    <div class="text-2xl font-bold text-blue-600">{{ stats.get('reviewed', 0) }}</div>
-    <div class="text-xs text-gray-500 mt-1">Reviewed</div>
+  <div class="bg-white rounded-card shadow-card p-5 text-center">
+    <div class="text-3xl font-bold text-near-black">{{ stats.get('reviewed', 0) }}</div>
+    <div class="text-sm text-text-secondary mt-1">Reviewed</div>
   </div>
 </div>
 {% endif %}
 
 <!-- Scraper Control Panel -->
 {% if source_status %}
-<div class="bg-white rounded-lg border p-4 mb-6">
-  <div class="flex items-center justify-between mb-3">
-    <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Scrapers</h2>
+<div class="bg-white rounded-card shadow-card p-6 mb-8">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-sm font-semibold text-text-secondary uppercase tracking-wider">Scrapers</h2>
     <div class="flex gap-2">
-      <button onclick="runSource('all')" class="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded hover:bg-gray-700">
+      <button onclick="runSource('all')" class="px-4 py-2 bg-near-black text-white text-sm font-medium rounded-btn hover:bg-brand transition">
         Run All
       </button>
-      <button onclick="runRescore()" class="px-3 py-1.5 bg-purple-600 text-white text-xs font-medium rounded hover:bg-purple-500">
+      <button onclick="runRescore()" class="px-4 py-2 bg-brand text-white text-sm font-medium rounded-btn hover:bg-brand-dark transition">
         Re-score All
       </button>
-      <a href="/settings" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-medium rounded hover:bg-gray-200">
+      <a href="/settings" class="px-4 py-2 bg-surface-secondary text-near-black text-sm font-medium rounded-btn hover:shadow-card transition">
         Edit AI Prompt
       </a>
     </div>
   </div>
-  <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+  <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
     {% for name in scraper_names %}
     {% set info = source_status.get(name, {}) %}
     {% set last = info.get('last_run') %}
-    <div class="border rounded-lg p-3 text-center">
-      <div class="text-xs font-semibold text-gray-700 mb-1">{{ name }}</div>
-      <div class="text-lg font-bold text-gray-900">{{ info.get('count', 0) }}</div>
-      <div class="text-[10px] text-gray-400 mb-2">
+    <div class="bg-surface-secondary rounded-badge p-4 text-center">
+      <div class="text-xs font-semibold text-text-secondary uppercase tracking-wide mb-1">{{ name }}</div>
+      <div class="text-2xl font-bold text-near-black">{{ info.get('count', 0) }}</div>
+      <div class="text-[11px] text-text-secondary mb-3">
         {% if last and last.completed_at %}
           {{ last.completed_at.strftime('%b %d %H:%M') }}
           {% if last.status == 'failed' %}
-          <span class="text-red-500">failed</span>
+          <span class="text-brand">failed</span>
           {% endif %}
         {% else %}
           never run
         {% endif %}
       </div>
       <button onclick="runSource('{{ name }}')"
-              class="w-full px-2 py-1 bg-blue-50 text-blue-700 text-[11px] font-medium rounded hover:bg-blue-100"
+              class="w-full px-3 py-1.5 bg-white text-near-black text-xs font-medium rounded-btn shadow-card hover:shadow-card-hover transition"
               id="btn-{{ name }}">
         Run
       </button>
@@ -71,14 +71,14 @@
 <script>
 function runSource(source) {
   const btn = document.getElementById('btn-' + source);
-  if (btn) { btn.textContent = 'Running...'; btn.disabled = true; }
+  if (btn) { btn.textContent = 'Running...'; btn.disabled = true; btn.style.opacity = '0.6'; }
   fetch('/run/' + source + '?secret={{ cron_secret }}', { method: 'POST' })
     .then(r => r.json())
     .then(d => {
       if (btn) { btn.textContent = 'Started'; }
       setTimeout(() => location.reload(), 5000);
     })
-    .catch(e => { if (btn) { btn.textContent = 'Error'; } });
+    .catch(e => { if (btn) { btn.textContent = 'Error'; btn.style.opacity = '1'; } });
 }
 function runRescore() {
   if (!confirm('Re-score all listings with the current AI prompt? This will take a few minutes.')) return;
@@ -91,11 +91,11 @@ function runRescore() {
 {% endif %}
 
 <!-- Tabs -->
-<div class="flex gap-2 mb-6 border-b border-gray-200 pb-2">
+<div class="flex gap-1 mb-6 border-b border-gray-100">
   {% for t, label in [('matches', 'Top Matches'), ('unreviewed', 'Unreviewed'), ('all', 'All'), ('reviewed', 'Reviewed')] %}
   <a href="/?tab={{ t }}"
-     class="px-4 py-2 rounded-t text-sm font-medium
-            {{ 'bg-white border border-b-white text-gray-900 -mb-[2px]' if tab == t else 'text-gray-500 hover:text-gray-700' }}">
+     class="px-5 py-3 text-sm font-medium transition
+            {{ 'text-near-black border-b-2 border-near-black' if tab == t else 'text-text-secondary hover:text-near-black' }}">
     {{ label }}
   </a>
   {% endfor %}
@@ -103,32 +103,32 @@ function runRescore() {
 
 <!-- Run history -->
 {% if tab == 'runs' %}
-<div class="bg-white rounded-lg border overflow-hidden">
+<div class="bg-white rounded-card shadow-card overflow-hidden">
   <table class="w-full text-sm">
-    <thead class="bg-gray-50 text-left text-gray-500">
+    <thead class="bg-surface-secondary text-left text-text-secondary">
       <tr>
-        <th class="px-4 py-3">Date</th>
-        <th class="px-4 py-3">Status</th>
-        <th class="px-4 py-3">Sources</th>
-        <th class="px-4 py-3">New</th>
-        <th class="px-4 py-3">Matches</th>
+        <th class="px-5 py-3 font-medium">Date</th>
+        <th class="px-5 py-3 font-medium">Status</th>
+        <th class="px-5 py-3 font-medium">Sources</th>
+        <th class="px-5 py-3 font-medium">New</th>
+        <th class="px-5 py-3 font-medium">Matches</th>
       </tr>
     </thead>
     <tbody>
       {% for run in runs %}
-      <tr class="border-t">
-        <td class="px-4 py-3">{{ run.started_at.strftime('%b %d, %I:%M %p') }}</td>
-        <td class="px-4 py-3">
-          <span class="px-2 py-0.5 rounded text-xs font-medium
-            {{ 'bg-green-100 text-green-700' if run.status == 'completed' else
-               'bg-red-100 text-red-700' if run.status == 'failed' else
-               'bg-yellow-100 text-yellow-700' }}">
+      <tr class="border-t border-gray-100">
+        <td class="px-5 py-3">{{ run.started_at.strftime('%b %d, %I:%M %p') }}</td>
+        <td class="px-5 py-3">
+          <span class="px-2.5 py-1 rounded-badge text-xs font-semibold
+            {{ 'bg-green-50 text-green-700' if run.status == 'completed' else
+               'bg-red-50 text-brand' if run.status == 'failed' else
+               'bg-yellow-50 text-yellow-700' }}">
             {{ run.status }}
           </span>
         </td>
-        <td class="px-4 py-3 text-gray-500">{{ (run.sources_scraped or []) | join(', ') }}</td>
-        <td class="px-4 py-3">{{ run.new_listings_found or 0 }}</td>
-        <td class="px-4 py-3 text-green-600 font-medium">{{ run.matches_found or 0 }}</td>
+        <td class="px-5 py-3 text-text-secondary">{{ (run.sources_scraped or []) | join(', ') }}</td>
+        <td class="px-5 py-3">{{ run.new_listings_found or 0 }}</td>
+        <td class="px-5 py-3 text-brand font-semibold">{{ run.matches_found or 0 }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -138,70 +138,75 @@ function runRescore() {
 {% else %}
 <!-- Listing cards -->
 {% if not listings %}
-<div class="text-center py-16 text-gray-400">
-  <p class="text-lg">No listings yet.</p>
+<div class="text-center py-20 text-text-secondary">
+  <p class="text-lg font-medium">No listings yet.</p>
   <p class="text-sm mt-2">Click Run on a scraper above to start.</p>
 </div>
 {% endif %}
 
 <div class="grid gap-4">
   {% for listing in listings %}
-  <a href="/listing/{{ listing.id }}" class="block bg-white rounded-lg border hover:border-gray-300 hover:shadow-sm transition p-4">
-    <div class="flex items-start gap-4">
-      <div class="flex-shrink-0 w-14 h-14 rounded-lg border-2 flex flex-col items-center justify-center
+  <a href="/listing/{{ listing.id }}" class="block bg-white rounded-card shadow-card hover:shadow-card-hover transition-shadow p-5">
+    <div class="flex items-start gap-5">
+      <!-- Score badge -->
+      <div class="flex-shrink-0 w-16 h-16 rounded-badge border-2 flex flex-col items-center justify-center
                   score-{{ listing.score_color }}">
-        <span class="text-xl font-bold leading-none">{{ listing.match_score if listing.match_score is not none else '?' }}</span>
-        <span class="text-[10px] mt-0.5">/10</span>
+        <span class="text-2xl font-bold leading-none">{{ listing.match_score if listing.match_score is not none else '?' }}</span>
+        <span class="text-[10px] font-medium mt-0.5">/10</span>
       </div>
+
+      <!-- Info -->
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
-          <h3 class="font-semibold text-gray-900 truncate">{{ listing.title or 'Untitled' }}</h3>
-          <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">{{ listing.source }}</span>
+          <h3 class="font-semibold text-near-black truncate text-base">{{ listing.title or 'Untitled' }}</h3>
+          <span class="text-xs px-2 py-0.5 rounded-badge bg-surface-secondary text-text-secondary font-medium">{{ listing.source }}</span>
           {% if listing.feedback %}
-          <span class="text-xs px-2 py-0.5 rounded
-            {{ 'bg-green-100 text-green-700' if listing.feedback == 'good_match' else 'bg-red-100 text-red-700' }}">
+          <span class="text-xs px-2 py-0.5 rounded-badge font-medium
+            {{ 'bg-green-50 text-green-700' if listing.feedback == 'good_match' else 'bg-red-50 text-red-700' }}">
             {{ listing.feedback | replace('_', ' ') }}
           </span>
           {% endif %}
         </div>
 
-        <!-- Key info row: price, neighborhood/city, availability -->
-        <div class="flex items-center gap-3 mt-1.5 flex-wrap">
+        <!-- Key info: price, city badge, move-in badge -->
+        <div class="flex items-center gap-3 mt-2 flex-wrap">
           {% if listing.price %}
-          <span class="text-base font-semibold text-gray-900">${{ '{:,}'.format(listing.price) }}/mo</span>
+          <span class="text-lg font-bold text-near-black">${{ '{:,}'.format(listing.price) }}<span class="text-sm font-medium text-text-secondary">/mo</span></span>
           {% endif %}
           {% if listing.neighborhood %}
-          <span class="text-sm font-medium px-2 py-0.5 rounded
-            {{ 'bg-emerald-100 text-emerald-800' if 'cambridge' in listing.neighborhood.lower() else
-               'bg-amber-100 text-amber-800' if 'somerville' in listing.neighborhood.lower() else
-               'bg-gray-100 text-gray-600' }}">
+          <span class="text-xs font-semibold px-2.5 py-1 rounded-badge
+            {{ 'bg-emerald-50 text-emerald-700' if 'cambridge' in listing.neighborhood.lower() else
+               'bg-amber-50 text-amber-700' if 'somerville' in listing.neighborhood.lower() else
+               'bg-surface-secondary text-text-secondary' }}">
             {{ listing.neighborhood }}
           </span>
           {% endif %}
           {% if listing.availability_date and listing.availability_date != 'unknown' %}
-          <span class="text-sm font-medium px-2 py-0.5 rounded
-            {{ 'bg-blue-100 text-blue-800' if '09-01' in listing.availability_date or '08-01' in listing.availability_date else
-               'bg-orange-100 text-orange-700' }}">
-            Move-in: {{ listing.availability_date }}
+          <span class="text-xs font-semibold px-2.5 py-1 rounded-badge
+            {{ 'bg-blue-50 text-blue-700' if '09-01' in listing.availability_date or '08-01' in listing.availability_date else
+               'bg-orange-50 text-orange-600' }}">
+            Move-in {{ listing.availability_date }}
           </span>
           {% endif %}
-          {% if listing.bedrooms %}<span class="text-sm text-gray-500">{{ listing.bedrooms | int }}bd</span>{% endif %}
-          {% if listing.bathrooms %}<span class="text-sm text-gray-500">{{ listing.bathrooms | int }}ba</span>{% endif %}
-          {% if listing.sqft %}<span class="text-sm text-gray-500">{{ '{:,}'.format(listing.sqft) }}sqft</span>{% endif %}
+          {% if listing.bedrooms %}<span class="text-sm text-text-secondary">{{ listing.bedrooms | int }}bd</span>{% endif %}
+          {% if listing.bathrooms %}<span class="text-sm text-text-secondary">{{ listing.bathrooms | int }}ba</span>{% endif %}
+          {% if listing.sqft %}<span class="text-sm text-text-secondary">{{ '{:,}'.format(listing.sqft) }}sqft</span>{% endif %}
         </div>
 
         {% if listing.summary %}
-        <p class="text-sm text-gray-600 mt-1 truncate">{{ listing.summary }}</p>
+        <p class="text-sm text-text-secondary mt-2 line-clamp-2">{{ listing.summary }}</p>
         {% endif %}
 
         <!-- Contact info -->
         {% if listing.contact_info %}
-        <div class="mt-1">
-          <span class="text-xs text-gray-500">Contact: </span>
-          <span class="text-xs font-medium text-gray-700">{{ listing.contact_info }}</span>
+        <div class="mt-2 flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          <span class="text-xs font-medium text-near-black">{{ listing.contact_info }}</span>
         </div>
         {% endif %}
       </div>
+
+      <!-- Arrow -->
       <div class="flex-shrink-0 text-gray-300 self-center">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
