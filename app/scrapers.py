@@ -572,11 +572,25 @@ def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[S
         return []
 
     client = ApifyClient(config.APIFY_API_TOKEN)
-    log.info(f"Running {source} (actor: {scraper.actor_id})")
 
-    actor_input = scraper.build_input()
-    run = client.actor(scraper.actor_id).call(run_input=actor_input, timeout_secs=600)
-    dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
+    # First, check if there's a recent successful run with unprocessed results.
+    # This recovers data from runs that completed but weren't processed (timeout, restart, etc.)
+    recent_runs = client.actor(scraper.actor_id).runs().list(limit=5, desc=True).items
+    dataset_id = None
+    for recent in recent_runs:
+        if recent.get("status") == "SUCCEEDED" and recent.get("stats", {}).get("itemCount", 0) > 0:
+            log.info(f"  {source}: found existing run with {recent['stats']['itemCount']} items, using that")
+            dataset_id = recent["defaultDatasetId"]
+            break
+
+    if not dataset_id:
+        # No recent run with data — start a new one
+        log.info(f"Running {source} (actor: {scraper.actor_id})")
+        actor_input = scraper.build_input()
+        run = client.actor(scraper.actor_id).call(run_input=actor_input, timeout_secs=600)
+        dataset_id = run["defaultDatasetId"]
+
+    dataset_items = client.dataset(dataset_id).list_items().items
 
     log.info(f"  {source}: got {len(dataset_items)} raw items")
     results: list[ScraperResult] = []
