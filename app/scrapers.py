@@ -90,8 +90,11 @@ def _scrape_craigslist() -> list[ScraperResult]:
     items = soup.select("li.cl-static-search-result")
     log.info(f"Craigslist: found {len(items)} search results")
 
-    # Extract basic info from search results
+    # Parse search cards and pre-filter before fetching detail pages
+    target_hoods_lower = [n.lower() for n in config.TARGET_NEIGHBORHOODS]
     listings: list[dict] = []
+    skipped = 0
+
     for item in items:
         link = item.select_one("a")
         if not link:
@@ -103,9 +106,25 @@ def _scrape_craigslist() -> list[ScraperResult]:
         location_el = item.select_one(".location")
         location = location_el.get_text(strip=True) if location_el else ""
 
-        # Extract post ID from URL
         post_id_match = re.search(r"/(\d{8,12})\.html", href)
         post_id = post_id_match.group(1) if post_id_match else _hash_id("craigslist", href)
+
+        # --- Card-level filters (skip obvious mismatches) ---
+        price = _safe_int(price_text)
+        if price and price > config.MAX_PRICE:
+            skipped += 1
+            continue
+
+        # Check location against target neighborhoods
+        loc_lower = location.lower()
+        title_lower = title.lower()
+        location_match = (
+            not location  # no location listed = don't filter out
+            or any(hood in loc_lower or hood in title_lower for hood in target_hoods_lower)
+        )
+        if not location_match:
+            skipped += 1
+            continue
 
         listings.append({
             "post_id": post_id,
@@ -115,7 +134,9 @@ def _scrape_craigslist() -> list[ScraperResult]:
             "location": location,
         })
 
-    # Fetch detail pages for full descriptions (with rate limiting)
+    log.info(f"Craigslist: {len(listings)} passed card filter, {skipped} skipped")
+
+    # Fetch detail pages only for listings that passed the card filter
     results: list[ScraperResult] = []
     for i, listing in enumerate(listings):
         try:
@@ -123,7 +144,6 @@ def _scrape_craigslist() -> list[ScraperResult]:
             if detail:
                 results.append(detail)
         except Exception as e:
-            # If detail fetch fails, still add with basic info
             log.warning(f"  CL detail fetch failed for {listing['post_id']}: {e}")
             results.append(ScraperResult(
                 source="craigslist",
@@ -135,7 +155,6 @@ def _scrape_craigslist() -> list[ScraperResult]:
                 raw_data=listing,
             ))
 
-        # Rate limit: ~1 req/sec to be respectful
         if i < len(listings) - 1:
             time.sleep(1.0)
 
