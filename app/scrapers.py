@@ -1,26 +1,30 @@
 """
-Apify-based scrapers for all rental platforms.
+Scrapers for rental listing platforms.
 
-Each scraper defines:
-  - actor_id: the Apify actor to run
-  - build_input(): returns the actor input dict
-  - transform(item): normalizes one actor result → dict ready for Listing model
+Craigslist: direct HTTP scraper (fast, free, gets full descriptions).
+Everything else: Apify actors.
 
-Actor IDs and input schemas change over time. If a scraper fails, check the
-Apify Store for the current actor version and adjust the input/transform.
+Actor IDs and input schemas change over time. If an Apify scraper fails,
+check the Apify Store for the current actor version and adjust the input/transform.
 """
 from __future__ import annotations
 
 import hashlib
 import logging
+import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+import httpx
+from bs4 import BeautifulSoup
 from apify_client import ApifyClient
 
 from app import config
 
 log = logging.getLogger(__name__)
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
 
 
 @dataclass
@@ -47,7 +51,7 @@ def _safe_int(val: Any) -> int | None:
     if val is None:
         return None
     try:
-        return int(float(val))
+        return int(float(str(val).replace("$", "").replace(",", "").strip()))
     except (ValueError, TypeError):
         return None
 
@@ -67,41 +71,152 @@ def _hash_id(source: str, *parts: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Transform functions — one per platform
-# Each takes a raw Apify dataset item and returns a ScraperResult
+# Craigslist — Direct HTTP scraper
 # ---------------------------------------------------------------------------
 
-def _transform_craigslist(item: dict) -> ScraperResult | None:
-    title = item.get("title") or item.get("name", "")
-    price = _safe_int(
-        item.get("price", "").replace("$", "").replace(",", "")
-        if isinstance(item.get("price"), str) else item.get("price")
+def _scrape_craigslist() -> list[ScraperResult]:
+    """Scrape Craigslist Boston apartments directly via HTTP."""
+    search_url = (
+        f"https://boston.craigslist.org/search/gbs/apa"
+        f"?min_price=0&max_price={config.MAX_PRICE}"
+        f"&min_bedrooms={config.BEDROOMS}&max_bedrooms={config.BEDROOMS}"
     )
-    desc = item.get("description") or item.get("body") or ""
-    url = item.get("url") or item.get("link", "")
-    posting_id = item.get("postingId") or item.get("id") or _hash_id("craigslist", url, title)
 
-    beds_raw = item.get("bedrooms") or item.get("housing", "")
-    beds = _safe_float(beds_raw)
+    log.info(f"Craigslist: fetching search results from {search_url}")
+    r = httpx.get(search_url, follow_redirects=True, headers=HEADERS, timeout=30)
+    r.raise_for_status()
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    items = soup.select("li.cl-static-search-result")
+    log.info(f"Craigslist: found {len(items)} search results")
+
+    # Extract basic info from search results
+    listings: list[dict] = []
+    for item in items:
+        link = item.select_one("a")
+        if not link:
+            continue
+        href = link.get("href", "")
+        title = item.get("title", "") or (item.select_one(".title") or link).get_text(strip=True)
+        price_el = item.select_one(".price")
+        price_text = price_el.get_text(strip=True) if price_el else ""
+        location_el = item.select_one(".location")
+        location = location_el.get_text(strip=True) if location_el else ""
+
+        # Extract post ID from URL
+        post_id_match = re.search(r"/(\d{8,12})\.html", href)
+        post_id = post_id_match.group(1) if post_id_match else _hash_id("craigslist", href)
+
+        listings.append({
+            "post_id": post_id,
+            "url": href,
+            "title": title,
+            "price": price_text,
+            "location": location,
+        })
+
+    # Fetch detail pages for full descriptions (with rate limiting)
+    results: list[ScraperResult] = []
+    for i, listing in enumerate(listings):
+        try:
+            detail = _fetch_craigslist_detail(listing)
+            if detail:
+                results.append(detail)
+        except Exception as e:
+            # If detail fetch fails, still add with basic info
+            log.warning(f"  CL detail fetch failed for {listing['post_id']}: {e}")
+            results.append(ScraperResult(
+                source="craigslist",
+                source_id=listing["post_id"],
+                url=listing["url"],
+                title=listing["title"],
+                price=_safe_int(listing["price"]),
+                neighborhood=listing["location"],
+                raw_data=listing,
+            ))
+
+        # Rate limit: ~1 req/sec to be respectful
+        if i < len(listings) - 1:
+            time.sleep(1.0)
+
+    log.info(f"Craigslist: got {len(results)} listings with details")
+    return results
+
+
+def _fetch_craigslist_detail(listing: dict) -> ScraperResult | None:
+    """Fetch a single Craigslist listing page for full description + attributes."""
+    url = listing["url"]
+    r = httpx.get(url, follow_redirects=True, headers=HEADERS, timeout=15)
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    # Description
+    body = soup.select_one("#postingbody")
+    if body:
+        # Remove the QR code link text that CL injects
+        for qr in body.select(".print-information"):
+            qr.decompose()
+        description = body.get_text(strip=True)
+    else:
+        description = ""
+
+    # Attributes (beds, baths, available date, pets, laundry, etc.)
+    attrs_text = []
+    beds = None
+    baths = None
+    for group in soup.select(".attrgroup"):
+        for span in group.select("span"):
+            text = span.get_text(strip=True)
+            attrs_text.append(text)
+            # Parse "1BR / 1Ba"
+            br_match = re.match(r"(\d+)BR", text)
+            ba_match = re.search(r"(\d+)Ba", text)
+            if br_match:
+                beds = float(br_match.group(1))
+            if ba_match:
+                baths = float(ba_match.group(1))
+
+    # Coordinates from map
+    mapbox = soup.select_one("#map")
+    lat = _safe_float(mapbox.get("data-latitude")) if mapbox else None
+    lng = _safe_float(mapbox.get("data-longitude")) if mapbox else None
+
+    # Images
+    images = []
+    for img in soup.select("#thumbs a"):
+        href = img.get("href", "")
+        if href:
+            images.append(href)
+
+    # Combine description with attributes for richer context
+    full_description = description
+    if attrs_text:
+        full_description += "\n\nAttributes: " + " | ".join(attrs_text)
 
     return ScraperResult(
         source="craigslist",
-        source_id=str(posting_id),
+        source_id=listing["post_id"],
         url=url,
-        title=title,
-        price=price,
+        title=listing["title"],
+        price=_safe_int(listing["price"]),
         bedrooms=beds,
-        bathrooms=_safe_float(item.get("bathrooms")),
-        sqft=_safe_int(item.get("sqft") or item.get("area")),
-        address=item.get("address") or item.get("location", ""),
-        neighborhood=item.get("neighborhood") or item.get("hood", ""),
-        latitude=_safe_float(item.get("latitude") or item.get("lat")),
-        longitude=_safe_float(item.get("longitude") or item.get("lng")),
-        description=desc,
-        images=item.get("images", []) or [],
-        raw_data=item,
+        bathrooms=baths,
+        address="",
+        neighborhood=listing["location"],
+        latitude=lat,
+        longitude=lng,
+        description=full_description,
+        images=images[:6],
+        raw_data={"listing": listing, "attrs": attrs_text},
     )
 
+
+# ---------------------------------------------------------------------------
+# Apify transform functions — one per platform
+# ---------------------------------------------------------------------------
 
 def _transform_zillow(item: dict) -> ScraperResult | None:
     zpid = item.get("zpid") or item.get("id") or ""
@@ -133,27 +248,26 @@ def _transform_zillow(item: dict) -> ScraperResult | None:
     )
 
 
-def _transform_apartments(item: dict) -> ScraperResult | None:
-    listing_id = item.get("id") or item.get("listingId") or ""
-    name = item.get("name") or item.get("propertyName") or ""
-    price_text = item.get("price") or item.get("rent") or ""
-    price = _safe_int(
-        str(price_text).replace("$", "").replace(",", "").split("-")[0].split("/")[0].strip()
-    )
+def _transform_aggregator(item: dict) -> ScraperResult | None:
+    """Transform for tri_angle/real-estate-aggregator (covers Apartments.com, Zumper, etc.)."""
+    prop_id = item.get("id") or item.get("listingId") or item.get("propertyId") or ""
+    source_site = item.get("source", "apartments").lower()
+    name = item.get("name") or item.get("propertyName") or item.get("title") or ""
+    price = _safe_int(item.get("price") or item.get("rent"))
 
     return ScraperResult(
-        source="apartments",
-        source_id=str(listing_id) or _hash_id("apartments", name, str(price)),
+        source=f"apartments ({source_site})" if source_site else "apartments",
+        source_id=str(prop_id) or _hash_id("apartments", name, str(price)),
         url=item.get("url") or item.get("link", ""),
         title=name,
         price=price,
         bedrooms=_safe_float(item.get("bedrooms") or item.get("beds")),
         bathrooms=_safe_float(item.get("bathrooms") or item.get("baths")),
-        sqft=_safe_int(item.get("sqft") or item.get("squareFeet")),
+        sqft=_safe_int(item.get("sqft") or item.get("squareFeet") or item.get("area")),
         address=item.get("address") or item.get("streetAddress", ""),
-        neighborhood=item.get("neighborhood") or "",
-        latitude=_safe_float(item.get("latitude")),
-        longitude=_safe_float(item.get("longitude")),
+        neighborhood=item.get("neighborhood") or item.get("city", ""),
+        latitude=_safe_float(item.get("latitude") or item.get("lat")),
+        longitude=_safe_float(item.get("longitude") or item.get("lng")),
         description=item.get("description") or "",
         images=item.get("images", []) or item.get("photos", []) or [],
         raw_data=item,
@@ -162,7 +276,7 @@ def _transform_apartments(item: dict) -> ScraperResult | None:
 
 
 def _transform_realtor(item: dict) -> ScraperResult | None:
-    prop_id = item.get("property_id") or item.get("listing_id") or ""
+    prop_id = item.get("property_id") or item.get("listing_id") or item.get("id") or ""
     location = item.get("location", {}) or {}
     address_data = location.get("address", {}) or {}
     coord = location.get("coordinate", {}) or {}
@@ -175,13 +289,13 @@ def _transform_realtor(item: dict) -> ScraperResult | None:
         sqft = _safe_int(desc.get("sqft"))
     else:
         desc_text = str(desc) if desc else ""
-        beds = _safe_float(item.get("beds"))
-        baths = _safe_float(item.get("baths"))
+        beds = _safe_float(item.get("beds") or item.get("bedrooms"))
+        baths = _safe_float(item.get("baths") or item.get("bathrooms"))
         sqft = _safe_int(item.get("sqft"))
 
     full_address = " ".join(filter(None, [
-        address_data.get("line", ""),
-        address_data.get("city", ""),
+        address_data.get("line", "") or item.get("address", ""),
+        address_data.get("city", "") or item.get("city", ""),
         address_data.get("state_code", ""),
         address_data.get("postal_code", ""),
     ]))
@@ -197,8 +311,8 @@ def _transform_realtor(item: dict) -> ScraperResult | None:
         sqft=sqft,
         address=full_address,
         neighborhood=address_data.get("neighborhood_name", ""),
-        latitude=_safe_float(coord.get("lat")),
-        longitude=_safe_float(coord.get("lon")),
+        latitude=_safe_float(coord.get("lat") or item.get("latitude")),
+        longitude=_safe_float(coord.get("lon") or item.get("longitude")),
         description=desc_text,
         images=[p.get("href", "") for p in (item.get("photos", []) or [])[:5]],
         raw_data=item,
@@ -206,7 +320,7 @@ def _transform_realtor(item: dict) -> ScraperResult | None:
 
 
 def _transform_redfin(item: dict) -> ScraperResult | None:
-    prop_id = item.get("propertyId") or item.get("mlsId") or item.get("listingId") or ""
+    prop_id = item.get("propertyId") or item.get("mlsId") or item.get("listingId") or item.get("id") or ""
     return ScraperResult(
         source="redfin",
         source_id=str(prop_id) or _hash_id("redfin", item.get("address", "")),
@@ -274,28 +388,8 @@ def _transform_rent(item: dict) -> ScraperResult | None:
 
 
 # ---------------------------------------------------------------------------
-# Scraper registry
+# Apify actor input builders
 # ---------------------------------------------------------------------------
-
-@dataclass
-class ScraperDef:
-    name: str
-    actor_id: str
-    enabled: bool
-    build_input: Callable[[], dict]
-    transform: Callable[[dict], ScraperResult | None]
-
-
-def _cl_input() -> dict:
-    return {
-        "startUrls": [
-            f"https://boston.craigslist.org/search/gbs/apa"
-            f"?min_price=0&max_price={config.MAX_PRICE}"
-            f"&min_bedrooms={config.BEDROOMS}&max_bedrooms={config.BEDROOMS}"
-        ],
-        "maxItems": 200,
-    }
-
 
 def _zillow_input() -> dict:
     return {
@@ -316,7 +410,6 @@ def _zillow_input() -> dict:
 
 
 def _apartments_input() -> dict:
-    # tri_angle/real-estate-aggregator covers Apartments.com, Zumper, and more
     return {
         "sources": ["apartments.com", "zumper"],
         "location": "Cambridge, MA",
@@ -329,7 +422,6 @@ def _apartments_input() -> dict:
 
 
 def _realtor_input() -> dict:
-    # crawlerbros/realtor-scraper — pass Realtor.com search URL
     return {
         "startUrls": [
             f"https://www.realtor.com/apartments/Cambridge_MA"
@@ -342,7 +434,6 @@ def _realtor_input() -> dict:
 
 
 def _redfin_input() -> dict:
-    # tri_angle/redfin-search
     return {
         "searchUrl": (
             "https://www.redfin.com/city/3312/MA/Cambridge/apartments-for-rent"
@@ -373,23 +464,47 @@ def _rent_input() -> dict:
     }
 
 
-SCRAPERS: list[ScraperDef] = [
-    ScraperDef("craigslist", config.CRAIGSLIST_ACTOR, config.ENABLE_CRAIGSLIST, _cl_input, _transform_craigslist),
-    ScraperDef("zillow", config.ZILLOW_ACTOR, config.ENABLE_ZILLOW, _zillow_input, _transform_zillow),
-    ScraperDef("apartments", config.APARTMENTS_ACTOR, config.ENABLE_APARTMENTS, _apartments_input, _transform_apartments),
-    ScraperDef("realtor", config.REALTOR_ACTOR, config.ENABLE_REALTOR, _realtor_input, _transform_realtor),
-    ScraperDef("redfin", config.REDFIN_ACTOR, config.ENABLE_REDFIN, _redfin_input, _transform_redfin),
-    ScraperDef("facebook", config.FACEBOOK_ACTOR, config.ENABLE_FACEBOOK, _facebook_input, _transform_facebook),
-    ScraperDef("rent", config.RENT_ACTOR, config.ENABLE_RENT, _rent_input, _transform_rent),
+# ---------------------------------------------------------------------------
+# Scraper registry
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ApifyScraperDef:
+    name: str
+    actor_id: str
+    enabled: bool
+    build_input: Callable[[], dict]
+    transform: Callable[[dict], ScraperResult | None]
+
+
+APIFY_SCRAPERS: list[ApifyScraperDef] = [
+    ApifyScraperDef("zillow", config.ZILLOW_ACTOR, config.ENABLE_ZILLOW, _zillow_input, _transform_zillow),
+    ApifyScraperDef("apartments", config.APARTMENTS_ACTOR, config.ENABLE_APARTMENTS, _apartments_input, _transform_aggregator),
+    ApifyScraperDef("realtor", config.REALTOR_ACTOR, config.ENABLE_REALTOR, _realtor_input, _transform_realtor),
+    ApifyScraperDef("redfin", config.REDFIN_ACTOR, config.ENABLE_REDFIN, _redfin_input, _transform_redfin),
+    ApifyScraperDef("facebook", config.FACEBOOK_ACTOR, config.ENABLE_FACEBOOK, _facebook_input, _transform_facebook),
+    ApifyScraperDef("rent", config.RENT_ACTOR, config.ENABLE_RENT, _rent_input, _transform_rent),
 ]
 
 
 def run_all_scrapers() -> list[ScraperResult]:
-    """Run every enabled Apify scraper and return normalized results."""
-    client = ApifyClient(config.APIFY_API_TOKEN)
+    """Run every enabled scraper and return normalized results."""
     all_results: list[ScraperResult] = []
 
-    for scraper in SCRAPERS:
+    # 1. Craigslist — direct HTTP scraper
+    if config.ENABLE_CRAIGSLIST:
+        try:
+            cl_results = _scrape_craigslist()
+            all_results.extend(cl_results)
+        except Exception as e:
+            log.error(f"Craigslist scraper failed: {e}")
+    else:
+        log.info("Skipping disabled scraper: craigslist")
+
+    # 2. Apify-based scrapers
+    client = ApifyClient(config.APIFY_API_TOKEN)
+
+    for scraper in APIFY_SCRAPERS:
         if not scraper.enabled:
             log.info(f"Skipping disabled scraper: {scraper.name}")
             continue
