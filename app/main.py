@@ -185,7 +185,7 @@ def _run_all(db: Session) -> list[dict]:
 @app.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
-    tab: str = Query("matches", pattern="^(matches|all|reviewed|unreviewed)$"),
+    tab: str = Query("matches", pattern="^(matches|all|reviewed|unreviewed|activity)$"),
     db: Session = Depends(get_db),
 ):
     query = db.query(Listing)

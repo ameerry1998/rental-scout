@@ -68,15 +68,6 @@
   </div>
 </div>
 
-<!-- Live Activity Log -->
-<div id="log-panel" class="bg-near-black rounded-card p-4 mb-6 hidden">
-  <div class="flex items-center justify-between mb-2">
-    <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Live Activity</h3>
-    <button onclick="document.getElementById('log-panel').classList.add('hidden'); polling=false;" class="text-xs text-gray-500 hover:text-gray-300">Hide</button>
-  </div>
-  <div id="log-lines" class="font-mono text-xs text-gray-300 max-h-64 overflow-y-auto space-y-0.5"></div>
-</div>
-
 <script>
 let polling = false;
 let logIndex = 0;
@@ -87,12 +78,13 @@ function pollLogs() {
     .then(r => r.json())
     .then(data => {
       const container = document.getElementById('log-lines');
+      if (!container) return;
       data.logs.forEach(entry => {
         const line = document.createElement('div');
         const color = entry.level === 'ERROR' ? 'text-red-400' :
                       entry.level === 'WARNING' ? 'text-yellow-400' : 'text-gray-300';
         line.className = color;
-        line.textContent = entry.ts + ' ' + entry.msg;
+        line.textContent = entry.ts + '  ' + entry.msg;
         container.appendChild(line);
       });
       logIndex = data.total;
@@ -102,37 +94,64 @@ function pollLogs() {
     .catch(() => { if (polling) setTimeout(pollLogs, 3000); });
 }
 
-function showLogs() {
-  document.getElementById('log-panel').classList.remove('hidden');
+function startPolling() {
+  if (polling) return;
   polling = true;
-  logIndex = 0;
-  document.getElementById('log-lines').innerHTML = '';
   pollLogs();
 }
 
 function runSource(source) {
   const btn = document.getElementById('btn-' + source);
   if (btn) { btn.textContent = 'Running...'; btn.disabled = true; btn.style.opacity = '0.6'; }
-  showLogs();
-  fetch('/run/' + source + '?secret={{ cron_secret }}', { method: 'POST' })
-    .then(r => r.json())
-    .then(d => { if (btn) { btn.textContent = 'Started'; } })
-    .catch(e => { if (btn) { btn.textContent = 'Error'; btn.style.opacity = '1'; } });
+  // Switch to activity tab
+  window.location.href = '/?tab=activity&action=run&source=' + source;
 }
 
 function runRescore() {
   if (!confirm('Re-score all listings with the current AI prompt? This will take a few minutes.')) return;
-  showLogs();
-  fetch('/rescore?secret={{ cron_secret }}', { method: 'POST' })
-    .then(r => r.json())
-    .catch(e => alert('Error: ' + e));
+  window.location.href = '/?tab=activity&action=rescore';
 }
+
+// Auto-trigger run/rescore if we landed here from a button click
+document.addEventListener('DOMContentLoaded', function() {
+  const params = new URLSearchParams(window.location.search);
+  const action = params.get('action');
+  const source = params.get('source');
+
+  if (action === 'run' && source) {
+    fetch('/run/' + source + '?secret={{ cron_secret }}', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => { startPolling(); })
+      .catch(e => {
+        const c = document.getElementById('log-lines');
+        if (c) c.innerHTML = '<div class="text-red-400">Failed to start: ' + e + '</div>';
+      });
+    // Clean URL
+    history.replaceState(null, '', '/?tab=activity');
+    startPolling();
+  } else if (action === 'rescore') {
+    fetch('/rescore?secret={{ cron_secret }}', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => { startPolling(); })
+      .catch(e => {
+        const c = document.getElementById('log-lines');
+        if (c) c.innerHTML = '<div class="text-red-400">Failed to start: ' + e + '</div>';
+      });
+    history.replaceState(null, '', '/?tab=activity');
+    startPolling();
+  }
+
+  // Auto-poll if we're on the activity tab
+  if (params.get('tab') === 'activity') {
+    startPolling();
+  }
+});
 </script>
 {% endif %}
 
 <!-- Tabs -->
 <div class="flex gap-1 mb-6 border-b border-gray-100">
-  {% for t, label in [('matches', 'Top Matches'), ('unreviewed', 'Unreviewed'), ('all', 'All'), ('reviewed', 'Reviewed')] %}
+  {% for t, label in [('matches', 'Top Matches'), ('unreviewed', 'Unreviewed'), ('all', 'All'), ('reviewed', 'Reviewed'), ('activity', 'Live Activity')] %}
   <a href="/?tab={{ t }}"
      class="px-5 py-3 text-sm font-medium transition
             {{ 'text-near-black border-b-2 border-near-black' if tab == t else 'text-text-secondary hover:text-near-black' }}">
@@ -141,8 +160,21 @@ function runRescore() {
   {% endfor %}
 </div>
 
-<!-- Run history -->
-{% if tab == 'runs' %}
+<!-- Tab content -->
+{% if tab == 'activity' %}
+<!-- Live Activity Log -->
+<div class="bg-near-black rounded-card p-5">
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Activity Log</h3>
+    <button onclick="logIndex=0; document.getElementById('log-lines').innerHTML=''; startPolling();"
+            class="text-xs font-medium text-gray-500 hover:text-gray-300 transition">Refresh</button>
+  </div>
+  <div id="log-lines" class="font-mono text-xs text-gray-300 max-h-[600px] overflow-y-auto space-y-0.5 leading-relaxed">
+    <div class="text-gray-500 italic">Polling for activity...</div>
+  </div>
+</div>
+
+{% elif tab == 'runs' %}
 <div class="bg-white rounded-card shadow-card overflow-hidden">
   <table class="w-full text-sm">
     <thead class="bg-surface-secondary text-left text-text-secondary">
@@ -188,14 +220,11 @@ function runRescore() {
   {% for listing in listings %}
   <a href="/listing/{{ listing.id }}" class="block bg-white rounded-card shadow-card hover:shadow-card-hover transition-shadow p-5">
     <div class="flex items-start gap-5">
-      <!-- Score badge -->
       <div class="flex-shrink-0 w-16 h-16 rounded-badge border-2 flex flex-col items-center justify-center
                   score-{{ listing.score_color }}">
         <span class="text-2xl font-bold leading-none">{{ listing.match_score if listing.match_score is not none else '?' }}</span>
         <span class="text-[10px] font-medium mt-0.5">/10</span>
       </div>
-
-      <!-- Info -->
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
           <h3 class="font-semibold text-near-black truncate text-base">{{ listing.title or 'Untitled' }}</h3>
@@ -207,8 +236,6 @@ function runRescore() {
           </span>
           {% endif %}
         </div>
-
-        <!-- Key info: price, city badge, move-in badge -->
         <div class="flex items-center gap-3 mt-2 flex-wrap">
           {% if listing.price %}
           <span class="text-lg font-bold text-near-black">${{ '{:,}'.format(listing.price) }}<span class="text-sm font-medium text-text-secondary">/mo</span></span>
@@ -232,12 +259,9 @@ function runRescore() {
           {% if listing.bathrooms %}<span class="text-sm text-text-secondary">{{ listing.bathrooms | int }}ba</span>{% endif %}
           {% if listing.sqft %}<span class="text-sm text-text-secondary">{{ '{:,}'.format(listing.sqft) }}sqft</span>{% endif %}
         </div>
-
         {% if listing.summary %}
         <p class="text-sm text-text-secondary mt-2 line-clamp-2">{{ listing.summary }}</p>
         {% endif %}
-
-        <!-- Contact info -->
         {% if listing.contact_info %}
         <div class="mt-2 flex items-center gap-1.5">
           <svg class="w-3.5 h-3.5 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
@@ -245,8 +269,6 @@ function runRescore() {
         </div>
         {% endif %}
       </div>
-
-      <!-- Arrow -->
       <div class="flex-shrink-0 text-gray-300 self-center">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
