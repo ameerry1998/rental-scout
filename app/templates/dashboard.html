@@ -68,23 +68,63 @@
   </div>
 </div>
 
+<!-- Live Activity Log -->
+<div id="log-panel" class="bg-near-black rounded-card p-4 mb-6 hidden">
+  <div class="flex items-center justify-between mb-2">
+    <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Live Activity</h3>
+    <button onclick="document.getElementById('log-panel').classList.add('hidden'); polling=false;" class="text-xs text-gray-500 hover:text-gray-300">Hide</button>
+  </div>
+  <div id="log-lines" class="font-mono text-xs text-gray-300 max-h-64 overflow-y-auto space-y-0.5"></div>
+</div>
+
 <script>
+let polling = false;
+let logIndex = 0;
+
+function pollLogs() {
+  if (!polling) return;
+  fetch('/api/logs?since=' + logIndex)
+    .then(r => r.json())
+    .then(data => {
+      const container = document.getElementById('log-lines');
+      data.logs.forEach(entry => {
+        const line = document.createElement('div');
+        const color = entry.level === 'ERROR' ? 'text-red-400' :
+                      entry.level === 'WARNING' ? 'text-yellow-400' : 'text-gray-300';
+        line.className = color;
+        line.textContent = entry.ts + ' ' + entry.msg;
+        container.appendChild(line);
+      });
+      logIndex = data.total;
+      container.scrollTop = container.scrollHeight;
+      if (polling) setTimeout(pollLogs, 2000);
+    })
+    .catch(() => { if (polling) setTimeout(pollLogs, 3000); });
+}
+
+function showLogs() {
+  document.getElementById('log-panel').classList.remove('hidden');
+  polling = true;
+  logIndex = 0;
+  document.getElementById('log-lines').innerHTML = '';
+  pollLogs();
+}
+
 function runSource(source) {
   const btn = document.getElementById('btn-' + source);
   if (btn) { btn.textContent = 'Running...'; btn.disabled = true; btn.style.opacity = '0.6'; }
+  showLogs();
   fetch('/run/' + source + '?secret={{ cron_secret }}', { method: 'POST' })
     .then(r => r.json())
-    .then(d => {
-      if (btn) { btn.textContent = 'Started'; }
-      setTimeout(() => location.reload(), 5000);
-    })
+    .then(d => { if (btn) { btn.textContent = 'Started'; } })
     .catch(e => { if (btn) { btn.textContent = 'Error'; btn.style.opacity = '1'; } });
 }
+
 function runRescore() {
   if (!confirm('Re-score all listings with the current AI prompt? This will take a few minutes.')) return;
+  showLogs();
   fetch('/rescore?secret={{ cron_secret }}', { method: 'POST' })
     .then(r => r.json())
-    .then(d => alert('Re-scoring started in background. Refresh in a few minutes.'))
     .catch(e => alert('Error: ' + e));
 }
 </script>

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import collections
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
@@ -16,7 +17,23 @@ from app.matcher import draft_message, score_and_update, get_match_prompt, save_
 from app.models import Listing, SearchRun
 from app.scrapers import ScraperResult, run_single_scraper, SCRAPER_NAMES
 
+# In-memory ring buffer for live activity logs (last 200 lines)
+activity_log: collections.deque[dict] = collections.deque(maxlen=200)
+
+
+class ActivityLogHandler(logging.Handler):
+    """Captures log lines from our app into the ring buffer for the UI."""
+    def emit(self, record):
+        if record.name.startswith("app.") or record.name == "__main__":
+            activity_log.append({
+                "ts": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+                "msg": record.getMessage(),
+                "level": record.levelname,
+            })
+
+
 logging.basicConfig(level=logging.INFO)
+logging.getLogger("app").addHandler(ActivityLogHandler())
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="Rental Scout", version="1.0.0")
@@ -115,10 +132,16 @@ def _run_source(source: str, db: Session) -> dict:
 
         log.info(f"[{source}] Scoring {len(new_listings)} new listings")
         matches = 0
-        for listing in new_listings:
-            score_and_update(listing, db)
-            if listing.match_score and listing.match_score >= 7:
-                matches += 1
+        for i, listing in enumerate(new_listings):
+            try:
+                score_and_update(listing, db)
+                if listing.match_score and listing.match_score >= 7:
+                    matches += 1
+                if (i + 1) % 10 == 0:
+                    log.info(f"[{source}] Scored {i + 1}/{len(new_listings)} — {matches} matches so far")
+            except Exception as e:
+                log.error(f"[{source}] Failed to score listing {listing.id}: {e}")
+                continue
 
         run.completed_at = datetime.now(timezone.utc)
         run.new_listings_found = len(new_listings)
@@ -399,6 +422,15 @@ def update_prompt(
         "prompt": prompt,
         "saved": True,
     })
+
+
+@app.get("/api/logs")
+def get_logs(since: int = Query(0)):
+    """Return recent activity log entries. `since` = index to fetch from (for polling)."""
+    logs = list(activity_log)
+    if since > 0 and since < len(logs):
+        logs = logs[since:]
+    return {"logs": logs, "total": len(activity_log)}
 
 
 @app.get("/health")
