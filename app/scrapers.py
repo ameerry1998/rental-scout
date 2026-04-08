@@ -316,18 +316,9 @@ def _zillow_input() -> dict:
 
 
 def _apartments_input() -> dict:
+    # tri_angle/real-estate-aggregator covers Apartments.com, Zumper, and more
     return {
-        "startUrls": [
-            f"https://www.apartments.com/cambridge-ma/"
-            f"{config.BEDROOMS}-bedrooms/"
-            f"under-{config.MAX_PRICE}/"
-        ],
-        "maxItems": 200,
-    }
-
-
-def _realtor_input() -> dict:
-    return {
+        "sources": ["apartments.com", "zumper"],
         "location": "Cambridge, MA",
         "listingType": "rent",
         "minBeds": config.BEDROOMS,
@@ -337,12 +328,26 @@ def _realtor_input() -> dict:
     }
 
 
-def _redfin_input() -> dict:
+def _realtor_input() -> dict:
+    # crawlerbros/realtor-scraper — pass Realtor.com search URL
     return {
         "startUrls": [
+            f"https://www.realtor.com/apartments/Cambridge_MA"
+            f"/beds-{config.BEDROOMS}"
+            f"/price-na-{config.MAX_PRICE}"
+            f"/type-apartment"
+        ],
+        "maxItems": 200,
+    }
+
+
+def _redfin_input() -> dict:
+    # tri_angle/redfin-search
+    return {
+        "searchUrl": (
             "https://www.redfin.com/city/3312/MA/Cambridge/apartments-for-rent"
             f"/filter/max-price={config.MAX_PRICE},min-beds={config.BEDROOMS},max-beds={config.BEDROOMS}"
-        ],
+        ),
         "maxItems": 200,
     }
 

@@ -45,14 +45,14 @@ TARGET_NEIGHBORHOODS = _list(
     )
 )
 
-# --- Apify actor IDs ---
-CRAIGSLIST_ACTOR = os.environ.get("CRAIGSLIST_ACTOR", "voyager/craigslist-scraper")
+# --- Apify actor IDs (verified against Apify Store 2026-04) ---
+CRAIGSLIST_ACTOR = os.environ.get("CRAIGSLIST_ACTOR", "easyapi/craigslist-search-results-scraper")
 ZILLOW_ACTOR = os.environ.get("ZILLOW_ACTOR", "maxcopell/zillow-scraper")
-APARTMENTS_ACTOR = os.environ.get("APARTMENTS_ACTOR", "epctex/apartments-scraper")
-REALTOR_ACTOR = os.environ.get("REALTOR_ACTOR", "maxcopell/realtor-scraper")
-REDFIN_ACTOR = os.environ.get("REDFIN_ACTOR", "epctex/redfin-scraper")
-FACEBOOK_ACTOR = os.environ.get("FACEBOOK_ACTOR", "apify/facebook-marketplace-scraper")
-RENT_ACTOR = os.environ.get("RENT_ACTOR", "epctex/rent-scraper")
+APARTMENTS_ACTOR = os.environ.get("APARTMENTS_ACTOR", "tri_angle/real-estate-aggregator")
+REALTOR_ACTOR = os.environ.get("REALTOR_ACTOR", "crawlerbros/realtor-scraper")
+REDFIN_ACTOR = os.environ.get("REDFIN_ACTOR", "tri_angle/redfin-search")
+FACEBOOK_ACTOR = os.environ.get("FACEBOOK_ACTOR", "webdatalabs/facebook-marketplace-deal-finder")
+RENT_ACTOR = os.environ.get("RENT_ACTOR", "benthepythondev/rent-com-scraper")
 
 # --- Enable/disable scrapers ---
 ENABLE_CRAIGSLIST = _bool(os.environ.get("ENABLE_CRAIGSLIST", "true"))
