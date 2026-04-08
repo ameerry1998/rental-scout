@@ -188,9 +188,11 @@ def dashboard(
     # Per-source last run info for control panel
     source_status = {}
     for name in SCRAPER_NAMES:
+        # Use cast to text for Postgres JSON compatibility
+        from sqlalchemy import cast, String
         last = (
             db.query(SearchRun)
-            .filter(SearchRun.sources_scraped.contains([name]))
+            .filter(cast(SearchRun.sources_scraped, String).contains(name))
             .order_by(SearchRun.started_at.desc())
             .first()
         )
