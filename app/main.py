@@ -15,7 +15,7 @@ from app import config
 from app.db import get_db, init_db
 from app.matcher import draft_message, score_and_update, score_and_update_batch, get_match_prompt, save_match_prompt
 from app.models import Listing, SearchRun, ActivityLog
-from app.scrapers import ScraperResult, run_single_scraper, SCRAPER_NAMES
+from app.scrapers import ScraperResult, run_single_scraper, trigger_new_scrape, SCRAPER_NAMES
 
 # Lock to prevent duplicate concurrent runs
 _running_jobs: set[str] = set()
@@ -340,6 +340,20 @@ def trigger_source_run(
 
     background_tasks.add_task(_bg)
     return {"status": "started", "source": source}
+
+
+@app.post("/scrape/{source}")
+def trigger_new_apify_scrape(
+    source: str,
+    secret: str = Query(...),
+):
+    """Trigger a fresh Apify run. Does NOT wait — results get imported on next Run click."""
+    if secret != config.CRON_SECRET:
+        raise HTTPException(403, "Invalid secret")
+    if source not in SCRAPER_NAMES:
+        raise HTTPException(404, f"Unknown source: {source}")
+    trigger_new_scrape(source)
+    return {"status": "triggered", "source": source, "message": "New scrape started. Click Run in a few minutes to import."}
 
 
 @app.post("/run/all")

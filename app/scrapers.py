@@ -573,28 +573,26 @@ def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[S
 
     client = ApifyClient(config.APIFY_API_TOKEN)
 
-    # First, check if there's a recent successful run with unprocessed results.
-    # This recovers data from runs that completed but weren't processed (timeout, restart, etc.)
+    # Pull from the most recent successful run's dataset.
+    # NEVER starts a new Apify run — use "New Scrape" for that.
     dataset_id = None
     try:
-        recent_runs = client.actor(scraper.actor_id).runs().list(limit=5).items
+        recent_runs = client.actor(scraper.actor_id).runs().list(limit=10).items
         log.info(f"  {source}: checking {len(recent_runs)} recent runs")
         for recent in recent_runs:
             status = recent.get("status")
             item_count = recent.get("stats", {}).get("itemCount", 0)
-            log.info(f"    run {recent.get('id','?')}: status={status}, items={item_count}")
+            log.info(f"    run {recent.get('id','?')[:12]}: status={status}, items={item_count}")
             if status == "SUCCEEDED" and item_count > 0:
                 dataset_id = recent.get("defaultDatasetId")
-                log.info(f"  {source}: using existing run with {item_count} items")
+                log.info(f"  {source}: importing {item_count} items from existing run")
                 break
     except Exception as e:
         log.warning(f"  {source}: couldn't check recent runs: {e}")
 
     if not dataset_id:
-        log.info(f"  {source}: no existing data, starting new run (actor: {scraper.actor_id})")
-        actor_input = scraper.build_input()
-        run = client.actor(scraper.actor_id).call(run_input=actor_input, timeout_secs=600)
-        dataset_id = run["defaultDatasetId"]
+        log.info(f"  {source}: no existing runs with data found. Use 'New Scrape' to trigger one.")
+        return []
 
     dataset_items = client.dataset(dataset_id).list_items().items
 
@@ -613,3 +611,21 @@ def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[S
 
     log.info(f"  {source}: {len(results)} new, {len(dataset_items) - len(results)} skipped")
     return results
+
+
+def trigger_new_scrape(source: str) -> None:
+    """Explicitly trigger a NEW Apify actor run. Does NOT wait for results.
+    Results get picked up on the next 'Run' click via run recovery."""
+    scraper = APIFY_SCRAPERS.get(source)
+    if not scraper:
+        log.warning(f"No Apify scraper for {source}")
+        return
+    if not scraper.enabled:
+        log.info(f"{source} is disabled")
+        return
+
+    client = ApifyClient(config.APIFY_API_TOKEN)
+    actor_input = scraper.build_input()
+    log.info(f"  {source}: triggering new Apify run (actor: {scraper.actor_id}) — NOT waiting for results")
+    client.actor(scraper.actor_id).start(run_input=actor_input)
+    log.info(f"  {source}: run started. Click 'Run' again in a few minutes to import results.")
