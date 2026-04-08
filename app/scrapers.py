@@ -520,29 +520,28 @@ def _scrape_bostonpads(known_ids: set[str] | None = None) -> list[ScraperResult]
         except Exception as e:
             log.warning(f"  BostonPads card parse error: {e}")
 
-    # Fetch detail pages for contact info (batch, not all)
-    for i, result in enumerate(results[:30]):
+    # Fetch detail pages for contact info (first 15 only, with short timeouts)
+    log.info(f"BostonPads: fetching details for {min(len(results), 15)} listings")
+    for i, result in enumerate(results[:15]):
         try:
-            detail_r = httpx.get(result.url, follow_redirects=True, headers=HEADERS, timeout=15)
+            detail_r = httpx.get(result.url, follow_redirects=True, headers=HEADERS, timeout=10)
+            if detail_r.status_code != 200:
+                continue
             detail_soup = BeautifulSoup(detail_r.text, "html.parser")
 
-            # Get full description
             desc = detail_soup.select_one("[class*=description], .bpo-listing-details-desc")
             if desc:
                 result.description = desc.get_text(strip=True)[:2000]
 
-            # Get contact info
             contact = detail_soup.select_one("[class*=contact], [class*=agent]")
             if contact:
                 result.contact_info = contact.get_text(" | ", strip=True)[:200]
 
-            # Get images
             imgs = detail_soup.select("img[src*='bostonpads.com/media']")
             result.images = [img["src"] for img in imgs[:5]]
-
-        except Exception:
-            pass
-        time.sleep(0.5)
+        except Exception as e:
+            log.warning(f"  BostonPads detail {i} failed: {e}")
+        time.sleep(0.3)
 
     log.info(f"BostonPads: got {len(results)} listings")
     return results
