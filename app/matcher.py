@@ -59,6 +59,7 @@ Each object must have these fields:
   "availability_raw": "<exact text from listing about availability, or 'none found'>",
   "is_room_share": <true/false>,
   "neighborhood": "<specific neighborhood and city, e.g. 'Central Square, Cambridge'>",
+  "contact_info": "<any phone numbers, emails, agent names, or office names found in the listing, comma-separated. Return 'none' if nothing found>",
   "match_reasons": ["<reason1>", "<reason2>"],
   "concerns": ["<concern1>", "<concern2>"],
   "summary": "<one-sentence summary>"
@@ -231,6 +232,10 @@ def _apply_result(listing: Listing, result: dict) -> None:
     listing.summary = result.get("summary", "")
     if not listing.neighborhood and result.get("neighborhood"):
         listing.neighborhood = result["neighborhood"]
+    # AI-extracted contact info — overwrite if AI found something and we don't have any
+    ai_contact = result.get("contact_info", "")
+    if ai_contact and ai_contact != "none" and not listing.contact_info:
+        listing.contact_info = ai_contact
 
 
 def score_and_update(listing: Listing, db: Session) -> None:
