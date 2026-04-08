@@ -256,6 +256,10 @@ def _fetch_craigslist_detail(listing: dict) -> ScraperResult | None:
 
 def _transform_zillow(item: dict) -> ScraperResult | None:
     # crawlerbros/zillow-scraper output shape
+    # Skip building-level listings — they have multiple units with different prices/dates
+    if item.get("propertyType") == "BUILDING":
+        return None
+
     zpid = item.get("zpid") or item.get("id") or ""
     price = _safe_int(item.get("price") or item.get("unformattedPrice"))
     address = item.get("address") or ""
