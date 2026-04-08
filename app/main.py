@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app import config
 from app.db import get_db, init_db
-from app.matcher import draft_message, score_and_update, get_match_prompt, save_match_prompt
+from app.matcher import draft_message, score_and_update, score_and_update_batch, get_match_prompt, save_match_prompt
 from app.models import Listing, SearchRun
 from app.scrapers import ScraperResult, run_single_scraper, SCRAPER_NAMES
 
@@ -130,18 +130,8 @@ def _run_source(source: str, db: Session) -> dict:
                 new_listings.append(listing)
         db.commit()
 
-        log.info(f"[{source}] Scoring {len(new_listings)} new listings")
-        matches = 0
-        for i, listing in enumerate(new_listings):
-            try:
-                score_and_update(listing, db)
-                if listing.match_score and listing.match_score >= 7:
-                    matches += 1
-                if (i + 1) % 10 == 0:
-                    log.info(f"[{source}] Scored {i + 1}/{len(new_listings)} — {matches} matches so far")
-            except Exception as e:
-                log.error(f"[{source}] Failed to score listing {listing.id}: {e}")
-                continue
+        log.info(f"[{source}] Batch-scoring {len(new_listings)} new listings (5 per API call)")
+        matches = score_and_update_batch(new_listings, db, batch_size=5)
 
         run.completed_at = datetime.now(timezone.utc)
         run.new_listings_found = len(new_listings)
@@ -351,7 +341,7 @@ def trigger_rescore(
         session = SessionLocal()
         try:
             listings = session.query(Listing).all()
-            log.info(f"Re-scoring {len(listings)} listings with current prompt")
+            log.info(f"Re-scoring {len(listings)} listings with current prompt (batch mode)")
             for listing in listings:
                 listing.match_score = None
                 listing.match_reasons = None
@@ -361,13 +351,7 @@ def trigger_rescore(
                 listing.availability_date = None
             session.commit()
 
-            matches = 0
-            for i, listing in enumerate(listings):
-                score_and_update(listing, session)
-                if listing.match_score and listing.match_score >= 7:
-                    matches += 1
-                if (i + 1) % 20 == 0:
-                    log.info(f"  Re-scored {i + 1}/{len(listings)}")
+            matches = score_and_update_batch(listings, session, batch_size=5)
             log.info(f"Re-score complete: {matches} matches out of {len(listings)}")
         finally:
             session.close()

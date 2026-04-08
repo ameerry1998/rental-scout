@@ -1,7 +1,7 @@
 """
 Claude-powered listing matcher and message drafter.
 
-Uses Haiku for fast scoring of every listing, Sonnet for drafting outreach.
+Batch scoring: sends 5 listings per API call for speed and rate limit avoidance.
 Scoring prompt is editable from the dashboard UI (stored in DB).
 Injects recent user feedback as few-shot examples to improve matching over time.
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 import anthropic
 from sqlalchemy.orm import Session
@@ -45,9 +46,14 @@ YOUR TASK:
 2. Determine the real neighborhood/city — not just what the listing says, check the address.
 3. Score 0-10 strictly using the rules above.
 4. Flag room shares, scams, or misleading listings.
+"""
 
-Respond with ONLY valid JSON (no markdown fences, no explanation):
-{{
+BATCH_FORMAT_INSTRUCTIONS = """You will receive multiple listings separated by "---LISTING N---" markers.
+
+Respond with a JSON ARRAY containing one object per listing, in the same order.
+Each object must have these fields:
+{
+  "id": <the listing number from the marker>,
   "score": <0-10>,
   "availability_date": "<YYYY-MM-DD or 'unknown'>",
   "availability_raw": "<exact text from listing about availability, or 'none found'>",
@@ -56,7 +62,9 @@ Respond with ONLY valid JSON (no markdown fences, no explanation):
   "match_reasons": ["<reason1>", "<reason2>"],
   "concerns": ["<concern1>", "<concern2>"],
   "summary": "<one-sentence summary>"
-}}"""
+}
+
+Respond with ONLY the JSON array (no markdown fences, no explanation)."""
 
 DRAFT_SYSTEM = """You are personalizing a rental inquiry message for a specific listing.
 
@@ -87,7 +95,6 @@ RULES:
 
 
 def get_match_prompt(db: Session) -> str:
-    """Get the scoring prompt — from DB if edited, otherwise the default."""
     row = db.query(Setting).filter_by(key="match_prompt").first()
     if row and row.value:
         return row.value
@@ -95,7 +102,6 @@ def get_match_prompt(db: Session) -> str:
 
 
 def save_match_prompt(db: Session, prompt: str) -> None:
-    """Save an updated scoring prompt to the DB."""
     row = db.query(Setting).filter_by(key="match_prompt").first()
     if row:
         row.value = prompt
@@ -145,52 +151,67 @@ def _build_listing_text(listing: Listing) -> str:
     if listing.url:
         parts.append(f"URL: {listing.url}")
     if listing.description:
-        desc = listing.description[:3000]
+        desc = listing.description[:2000]
         parts.append(f"\nFull description:\n{desc}")
     return "\n".join(parts)
 
 
-def score_listing(listing: Listing, db: Session) -> dict:
+def score_batch(listings: list[Listing], db: Session) -> list[dict]:
+    """Score multiple listings in a single API call. Returns list of result dicts."""
     feedback_ctx = _get_feedback_examples(db)
-    listing_text = _build_listing_text(listing)
-    system_prompt = get_match_prompt(db)
+    system_prompt = get_match_prompt(db) + "\n\n" + BATCH_FORMAT_INSTRUCTIONS
 
-    user_msg = listing_text
+    # Build the multi-listing prompt
+    parts = []
     if feedback_ctx:
-        user_msg = f"{feedback_ctx}\n\n---\n\nLISTING TO EVALUATE:\n{listing_text}"
+        parts.append(feedback_ctx)
+        parts.append("\n---\n")
+    for i, listing in enumerate(listings):
+        parts.append(f"---LISTING {i + 1}---")
+        parts.append(_build_listing_text(listing))
+        parts.append("")
+
+    user_msg = "\n".join(parts)
 
     try:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=500,
+            max_tokens=300 * len(listings),
             system=system_prompt,
             messages=[{"role": "user", "content": user_msg}],
         )
         raw = response.content[0].text.strip()
         if raw.startswith("```"):
             raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-        return json.loads(raw)
-    except (json.JSONDecodeError, IndexError, KeyError) as e:
-        log.warning(f"Failed to parse matcher response for listing {listing.id}: {e}")
-        return {
-            "score": 0,
-            "availability_date": "unknown",
-            "availability_raw": "none found",
-            "is_room_share": False,
-            "neighborhood": "",
-            "match_reasons": [],
-            "concerns": ["AI scoring failed — review manually"],
-            "summary": listing.title or "Unknown listing",
-        }
+        results = json.loads(raw)
+        if isinstance(results, list):
+            return results
+        return [results]
+    except Exception as e:
+        log.error(f"Batch scoring failed: {e}")
+        # Return empty results so caller can fall back
+        return []
+
+
+def _default_result(listing: Listing) -> dict:
+    return {
+        "score": 0,
+        "availability_date": "unknown",
+        "availability_raw": "none found",
+        "is_room_share": False,
+        "neighborhood": "",
+        "match_reasons": [],
+        "concerns": ["AI scoring failed — review manually"],
+        "summary": listing.title or "Unknown listing",
+    }
 
 
 def draft_message(listing: Listing) -> str:
     listing_text = _build_listing_text(listing)
-
     try:
         response = client.messages.create(
             model="claude-sonnet-4-5-20241022",
-            max_tokens=300,
+            max_tokens=400,
             system=DRAFT_SYSTEM,
             messages=[{"role": "user", "content": f"LISTING:\n{listing_text}"}],
         )
@@ -200,20 +221,66 @@ def draft_message(listing: Listing) -> str:
         return ""
 
 
-def score_and_update(listing: Listing, db: Session) -> None:
-    result = score_listing(listing, db)
-
+def _apply_result(listing: Listing, result: dict) -> None:
+    """Apply a scoring result dict to a Listing model."""
     listing.match_score = result.get("score", 0)
     listing.availability_date = result.get("availability_date", "unknown")
     listing.is_room_share = result.get("is_room_share", False)
     listing.match_reasons = result.get("match_reasons", [])
     listing.match_concerns = result.get("concerns", [])
     listing.summary = result.get("summary", "")
-
     if not listing.neighborhood and result.get("neighborhood"):
         listing.neighborhood = result["neighborhood"]
+
+
+def score_and_update(listing: Listing, db: Session) -> None:
+    """Score a single listing (fallback, used for one-offs)."""
+    results = score_batch([listing], db)
+    result = results[0] if results else _default_result(listing)
+    _apply_result(listing, result)
 
     if listing.match_score >= 7 and not listing.is_room_share:
         listing.draft_message = draft_message(listing)
 
     db.commit()
+
+
+def score_and_update_batch(listings: list[Listing], db: Session, batch_size: int = 5) -> int:
+    """Score listings in batches of batch_size. Returns total matches found."""
+    matches = 0
+    total = len(listings)
+
+    for batch_start in range(0, total, batch_size):
+        batch = listings[batch_start:batch_start + batch_size]
+        batch_num = batch_start // batch_size + 1
+        total_batches = (total + batch_size - 1) // batch_size
+        log.info(f"  Scoring batch {batch_num}/{total_batches} ({len(batch)} listings)")
+
+        try:
+            results = score_batch(batch, db)
+
+            # Match results to listings by position
+            for j, listing in enumerate(batch):
+                if j < len(results):
+                    _apply_result(listing, results[j])
+                else:
+                    _apply_result(listing, _default_result(listing))
+
+                if listing.match_score >= 7 and not listing.is_room_share:
+                    listing.draft_message = draft_message(listing)
+                    matches += 1
+
+            db.commit()
+            log.info(f"  Batch {batch_num} done — {matches} matches so far")
+
+        except Exception as e:
+            log.error(f"  Batch {batch_num} failed: {e}")
+            # Apply defaults for the failed batch
+            for listing in batch:
+                _apply_result(listing, _default_result(listing))
+            db.commit()
+
+        # Small delay between batches to avoid rate limits
+        time.sleep(0.5)
+
+    return matches
