@@ -77,3 +77,13 @@ class Setting(Base):
 
     key = Column(String(100), primary_key=True)
     value = Column(Text, nullable=False)
+
+
+class ActivityLog(Base):
+    __tablename__ = "activity_logs"
+
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(DateTime, default=_now, index=True)
+    level = Column(String(10), default="INFO")
+    message = Column(Text, nullable=False)
+    source = Column(String(50))  # which scraper/job produced this

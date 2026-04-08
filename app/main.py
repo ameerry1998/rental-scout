@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import collections
 import logging
 import threading
 from datetime import datetime, timezone
@@ -15,30 +14,33 @@ from sqlalchemy.orm import Session
 from app import config
 from app.db import get_db, init_db
 from app.matcher import draft_message, score_and_update, score_and_update_batch, get_match_prompt, save_match_prompt
-from app.models import Listing, SearchRun
+from app.models import Listing, SearchRun, ActivityLog
 from app.scrapers import ScraperResult, run_single_scraper, SCRAPER_NAMES
-
-# In-memory ring buffer for live activity logs (last 200 lines)
-activity_log: collections.deque[dict] = collections.deque(maxlen=200)
 
 # Lock to prevent duplicate concurrent runs
 _running_jobs: set[str] = set()
 _jobs_lock = threading.Lock()
 
 
-class ActivityLogHandler(logging.Handler):
-    """Captures log lines from our app into the ring buffer for the UI."""
+class DBLogHandler(logging.Handler):
+    """Writes app log lines to the activity_logs DB table so they persist."""
     def emit(self, record):
         if record.name.startswith("app.") or record.name == "__main__":
-            activity_log.append({
-                "ts": datetime.now(timezone.utc).strftime("%H:%M:%S"),
-                "msg": record.getMessage(),
-                "level": record.levelname,
-            })
+            try:
+                from app.db import SessionLocal
+                session = SessionLocal()
+                session.add(ActivityLog(
+                    level=record.levelname,
+                    message=record.getMessage(),
+                ))
+                session.commit()
+                session.close()
+            except Exception:
+                pass
 
 
 logging.basicConfig(level=logging.INFO)
-logging.getLogger("app").addHandler(ActivityLogHandler())
+logging.getLogger("app").addHandler(DBLogHandler())
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="Rental Scout", version="1.0.0")
@@ -436,14 +438,26 @@ def update_prompt(
 
 
 @app.get("/api/logs")
-def get_logs(since: int = Query(0)):
-    """Return recent activity log entries. `since` = total count last seen, returns only new entries."""
-    total = len(activity_log)
-    if since >= total:
-        return {"logs": [], "total": total}
-    logs = list(activity_log)
-    new_logs = logs[since:]
-    return {"logs": new_logs, "total": total}
+def get_logs(since_id: int = Query(0), db: Session = Depends(get_db)):
+    """Return activity log entries. `since_id` = last log ID seen, returns only newer entries."""
+    query = db.query(ActivityLog)
+    if since_id > 0:
+        query = query.filter(ActivityLog.id > since_id)
+    else:
+        # First load: show last 100 entries
+        query = query.order_by(ActivityLog.id.desc()).limit(100)
+        entries = query.all()
+        entries.reverse()
+        return {
+            "logs": [{"id": e.id, "ts": e.timestamp.strftime("%Y-%m-%d %H:%M:%S"), "msg": e.message, "level": e.level} for e in entries],
+            "last_id": entries[-1].id if entries else 0,
+        }
+
+    entries = query.order_by(ActivityLog.id.asc()).limit(50).all()
+    return {
+        "logs": [{"id": e.id, "ts": e.timestamp.strftime("%Y-%m-%d %H:%M:%S"), "msg": e.message, "level": e.level} for e in entries],
+        "last_id": entries[-1].id if entries else since_id,
+    }
 
 
 @app.get("/api/status")
