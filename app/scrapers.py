@@ -575,17 +575,23 @@ def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[S
 
     # First, check if there's a recent successful run with unprocessed results.
     # This recovers data from runs that completed but weren't processed (timeout, restart, etc.)
-    recent_runs = client.actor(scraper.actor_id).runs().list(limit=5, desc=True).items
     dataset_id = None
-    for recent in recent_runs:
-        if recent.get("status") == "SUCCEEDED" and recent.get("stats", {}).get("itemCount", 0) > 0:
-            log.info(f"  {source}: found existing run with {recent['stats']['itemCount']} items, using that")
-            dataset_id = recent["defaultDatasetId"]
-            break
+    try:
+        recent_runs = client.actor(scraper.actor_id).runs().list(limit=5).items
+        log.info(f"  {source}: checking {len(recent_runs)} recent runs")
+        for recent in recent_runs:
+            status = recent.get("status")
+            item_count = recent.get("stats", {}).get("itemCount", 0)
+            log.info(f"    run {recent.get('id','?')}: status={status}, items={item_count}")
+            if status == "SUCCEEDED" and item_count > 0:
+                dataset_id = recent.get("defaultDatasetId")
+                log.info(f"  {source}: using existing run with {item_count} items")
+                break
+    except Exception as e:
+        log.warning(f"  {source}: couldn't check recent runs: {e}")
 
     if not dataset_id:
-        # No recent run with data — start a new one
-        log.info(f"Running {source} (actor: {scraper.actor_id})")
+        log.info(f"  {source}: no existing data, starting new run (actor: {scraper.actor_id})")
         actor_input = scraper.build_input()
         run = client.actor(scraper.actor_id).call(run_input=actor_input, timeout_secs=600)
         dataset_id = run["defaultDatasetId"]
