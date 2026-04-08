@@ -74,8 +74,10 @@ def _hash_id(source: str, *parts: str) -> str:
 # Craigslist — Direct HTTP scraper
 # ---------------------------------------------------------------------------
 
-def _scrape_craigslist() -> list[ScraperResult]:
-    """Scrape Craigslist Boston apartments directly via HTTP."""
+def _scrape_craigslist(known_ids: set[str] | None = None) -> list[ScraperResult]:
+    """Scrape Craigslist Boston apartments directly via HTTP.
+    known_ids: source_ids already in the DB — skip detail page fetches for these."""
+    known_ids = known_ids or set()
     search_url = (
         f"https://boston.craigslist.org/search/gbs/apa"
         f"?min_price=0&max_price={config.MAX_PRICE}"
@@ -134,29 +136,33 @@ def _scrape_craigslist() -> list[ScraperResult]:
             "location": location,
         })
 
-    log.info(f"Craigslist: {len(listings)} passed card filter, {skipped} skipped")
+    # Skip listings we already have in the DB
+    new_listings = [l for l in listings if l["post_id"] not in known_ids]
+    already_seen = len(listings) - len(new_listings)
+    log.info(f"Craigslist: {len(listings)} passed card filter, {skipped} skipped, {already_seen} already in DB, {len(new_listings)} new to fetch")
 
-    # Fetch detail pages only for listings that passed the card filter
+    # Only fetch detail pages for genuinely new listings
     results: list[ScraperResult] = []
-    for i, listing in enumerate(listings):
-        try:
-            detail = _fetch_craigslist_detail(listing)
-            if detail:
-                results.append(detail)
-        except Exception as e:
-            log.warning(f"  CL detail fetch failed for {listing['post_id']}: {e}")
-            results.append(ScraperResult(
-                source="craigslist",
-                source_id=listing["post_id"],
-                url=listing["url"],
-                title=listing["title"],
-                price=_safe_int(listing["price"]),
-                neighborhood=listing["location"],
-                raw_data=listing,
-            ))
-
-        if i < len(listings) - 1:
-            time.sleep(1.0)
+    batch_size = 5
+    for batch_start in range(0, len(new_listings), batch_size):
+        batch = new_listings[batch_start:batch_start + batch_size]
+        for listing in batch:
+            try:
+                detail = _fetch_craigslist_detail(listing)
+                if detail:
+                    results.append(detail)
+            except Exception as e:
+                log.warning(f"  CL detail fetch failed for {listing['post_id']}: {e}")
+                results.append(ScraperResult(
+                    source="craigslist",
+                    source_id=listing["post_id"],
+                    url=listing["url"],
+                    title=listing["title"],
+                    price=_safe_int(listing["price"]),
+                    neighborhood=listing["location"],
+                    raw_data=listing,
+                ))
+        time.sleep(0.5)
 
     log.info(f"Craigslist: got {len(results)} listings with details")
     return results
@@ -506,14 +512,19 @@ APIFY_SCRAPERS: list[ApifyScraperDef] = [
 ]
 
 
-def run_all_scrapers() -> list[ScraperResult]:
-    """Run every enabled scraper and return normalized results."""
+def run_all_scrapers(known_ids_by_source: dict[str, set[str]] | None = None) -> list[ScraperResult]:
+    """Run every enabled scraper and return only NEW normalized results.
+
+    known_ids_by_source: {"craigslist": {"123", "456"}, "zillow": {"zpid1"}, ...}
+    Listings with these source_ids are skipped entirely — no detail fetches, no transforms.
+    """
+    known = known_ids_by_source or {}
     all_results: list[ScraperResult] = []
 
-    # 1. Craigslist — direct HTTP scraper
+    # 1. Craigslist — direct HTTP scraper (knows how to skip detail fetches)
     if config.ENABLE_CRAIGSLIST:
         try:
-            cl_results = _scrape_craigslist()
+            cl_results = _scrape_craigslist(known_ids=known.get("craigslist", set()))
             all_results.extend(cl_results)
         except Exception as e:
             log.error(f"Craigslist scraper failed: {e}")
@@ -528,6 +539,7 @@ def run_all_scrapers() -> list[ScraperResult]:
             log.info(f"Skipping disabled scraper: {scraper.name}")
             continue
 
+        scraper_known = known.get(scraper.name, set())
         log.info(f"Running {scraper.name} (actor: {scraper.actor_id})")
         try:
             actor_input = scraper.build_input()
@@ -535,18 +547,25 @@ def run_all_scrapers() -> list[ScraperResult]:
             dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
 
             log.info(f"  {scraper.name}: got {len(dataset_items)} raw items")
+            new_count = 0
             for item in dataset_items:
                 try:
                     result = scraper.transform(item)
-                    if result:
-                        all_results.append(result)
+                    if not result:
+                        continue
+                    # Skip if we already have this listing
+                    if result.source_id in scraper_known:
+                        continue
+                    all_results.append(result)
+                    new_count += 1
                 except Exception as e:
                     log.warning(f"  {scraper.name} transform error: {e}")
                     continue
+            log.info(f"  {scraper.name}: {new_count} new, {len(dataset_items) - new_count} already known")
 
         except Exception as e:
             log.error(f"  {scraper.name} actor failed: {e}")
             continue
 
-    log.info(f"Total scraped results: {len(all_results)}")
+    log.info(f"Total new scraped results: {len(all_results)}")
     return all_results

@@ -67,25 +67,61 @@ def _upsert_listing(db: Session, result: ScraperResult) -> Optional[Listing]:
     return listing
 
 
+def _passes_prefilter(r: ScraperResult) -> bool:
+    """Fast structured-data check before storing or sending to AI.
+    Rejects listings that are obviously wrong based on price, beds,
+    or neighborhood — no API calls needed."""
+    # Price check (Craigslist URL filter handles this too, but Apify results may not)
+    if r.price and r.price > config.MAX_PRICE:
+        return False
+
+    # Bedroom check — skip if clearly wrong (allow None through since it might be unlisted)
+    if r.bedrooms is not None and r.bedrooms != config.BEDROOMS:
+        return False
+
+    # Neighborhood check — only reject if we have location info AND it doesn't match
+    if r.neighborhood or r.address:
+        text = f"{r.neighborhood} {r.address} {r.title or ''}".lower()
+        target_hoods = [n.lower() for n in config.TARGET_NEIGHBORHOODS]
+        if not any(hood in text for hood in target_hoods):
+            return False
+
+    return True
+
+
 def _run_pipeline(db: Session) -> dict:
-    """Full pipeline: scrape → dedup → score → draft."""
+    """Full pipeline: load known IDs → scrape only new → pre-filter → AI score."""
     run = SearchRun(status="running")
     db.add(run)
     db.commit()
 
     try:
-        results = run_all_scrapers()
-        sources_seen = list({r.source for r in results})
+        # Load all known source_ids from DB so scrapers can skip them entirely
+        existing = db.query(Listing.source, Listing.source_id).all()
+        known_ids_by_source: dict[str, set[str]] = {}
+        for source, source_id in existing:
+            known_ids_by_source.setdefault(source, set()).add(source_id)
+        log.info(f"Known listings in DB: {len(existing)} across {len(known_ids_by_source)} sources")
 
+        results = run_all_scrapers(known_ids_by_source=known_ids_by_source)
+        sources_seen = list({r.source for r in results})
+        total_scraped = len(results)
+
+        # Pre-filter on structured data — no AI calls wasted
+        filtered = [r for r in results if _passes_prefilter(r)]
+        log.info(f"Pre-filter: {total_scraped} new scraped → {len(filtered)} passed ({total_scraped - len(filtered)} rejected)")
+
+        # Store filtered listings
         new_listings: list[Listing] = []
-        for r in results:
+        for r in filtered:
             listing = _upsert_listing(db, r)
             if listing:
                 new_listings.append(listing)
         db.commit()
 
-        log.info(f"New listings to score: {len(new_listings)}")
+        log.info(f"New listings to AI-score: {len(new_listings)}")
 
+        # AI scoring — only for new, pre-filtered listings
         matches = 0
         for listing in new_listings:
             score_and_update(listing, db)
@@ -101,6 +137,8 @@ def _run_pipeline(db: Session) -> dict:
 
         return {
             "status": "completed",
+            "scraped": total_scraped,
+            "passed_filter": len(filtered),
             "new_listings": len(new_listings),
             "matches": matches,
             "sources": sources_seen,
