@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -19,6 +20,10 @@ from app.scrapers import ScraperResult, run_single_scraper, SCRAPER_NAMES
 
 # In-memory ring buffer for live activity logs (last 200 lines)
 activity_log: collections.deque[dict] = collections.deque(maxlen=200)
+
+# Lock to prevent duplicate concurrent runs
+_running_jobs: set[str] = set()
+_jobs_lock = threading.Lock()
 
 
 class ActivityLogHandler(logging.Handler):
@@ -292,6 +297,12 @@ def trigger_source_run(
     if source not in SCRAPER_NAMES:
         raise HTTPException(404, f"Unknown source: {source}. Available: {SCRAPER_NAMES}")
 
+    job_key = f"run:{source}"
+    with _jobs_lock:
+        if job_key in _running_jobs:
+            return {"status": "already_running", "source": source}
+        _running_jobs.add(job_key)
+
     def _bg():
         from app.db import SessionLocal
         session = SessionLocal()
@@ -299,6 +310,8 @@ def trigger_source_run(
             _run_source(source, session)
         finally:
             session.close()
+            with _jobs_lock:
+                _running_jobs.discard(job_key)
 
     background_tasks.add_task(_bg)
     return {"status": "started", "source": source}
@@ -312,6 +325,11 @@ def trigger_all_run(
     if secret != config.CRON_SECRET:
         raise HTTPException(403, "Invalid secret")
 
+    with _jobs_lock:
+        if "run:all" in _running_jobs:
+            return {"status": "already_running"}
+        _running_jobs.add("run:all")
+
     def _bg():
         from app.db import SessionLocal
         session = SessionLocal()
@@ -319,6 +337,8 @@ def trigger_all_run(
             _run_all(session)
         finally:
             session.close()
+            with _jobs_lock:
+                _running_jobs.discard("run:all")
 
     background_tasks.add_task(_bg)
     return {"status": "started", "sources": SCRAPER_NAMES}
@@ -335,6 +355,11 @@ def trigger_rescore(
 ):
     if secret != config.CRON_SECRET:
         raise HTTPException(403, "Invalid secret")
+
+    with _jobs_lock:
+        if "rescore" in _running_jobs:
+            return {"status": "already_running"}
+        _running_jobs.add("rescore")
 
     def _bg():
         from app.db import SessionLocal
@@ -355,6 +380,8 @@ def trigger_rescore(
             log.info(f"Re-score complete: {matches} matches out of {len(listings)}")
         finally:
             session.close()
+            with _jobs_lock:
+                _running_jobs.discard("rescore")
 
     background_tasks.add_task(_bg)
     return {"status": "started", "message": "Re-scoring all listings in background"}
@@ -410,11 +437,20 @@ def update_prompt(
 
 @app.get("/api/logs")
 def get_logs(since: int = Query(0)):
-    """Return recent activity log entries. `since` = index to fetch from (for polling)."""
+    """Return recent activity log entries. `since` = total count last seen, returns only new entries."""
+    total = len(activity_log)
+    if since >= total:
+        return {"logs": [], "total": total}
     logs = list(activity_log)
-    if since > 0 and since < len(logs):
-        logs = logs[since:]
-    return {"logs": logs, "total": len(activity_log)}
+    new_logs = logs[since:]
+    return {"logs": new_logs, "total": total}
+
+
+@app.get("/api/status")
+def get_status():
+    """Check what jobs are currently running."""
+    with _jobs_lock:
+        return {"running": list(_running_jobs)}
 
 
 @app.get("/health")
