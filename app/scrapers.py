@@ -216,6 +216,16 @@ def _fetch_craigslist_detail(listing: dict) -> ScraperResult | None:
         if href:
             images.append(href)
 
+    # Extract contact info — emails and phone numbers from description
+    contact_parts = []
+    emails = re.findall(r'[\w.+-]+@[\w-]+\.[\w.-]+', description)
+    phones = re.findall(r'(?:\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', description)
+    contact_parts.extend(emails)
+    contact_parts.extend(phones)
+    # Also check for reply link on CL
+    reply_link = soup.select_one("a.reply-button, a[href*='reply']")
+    contact_info = ", ".join(contact_parts) if contact_parts else None
+
     # Combine description with attributes for richer context
     full_description = description
     if attrs_text:
@@ -223,6 +233,7 @@ def _fetch_craigslist_detail(listing: dict) -> ScraperResult | None:
 
     return ScraperResult(
         source="craigslist",
+        contact_info=contact_info,
         source_id=listing["post_id"],
         url=url,
         title=listing["title"],
