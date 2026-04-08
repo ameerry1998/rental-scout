@@ -182,27 +182,30 @@ def _run_all(db: Session) -> list[dict]:
 @app.get("/", response_class=HTMLResponse)
 def dashboard(
     request: Request,
-    tab: str = Query("matches", pattern="^(matches|all|reviewed|unreviewed|activity)$"),
+    tab: str = Query("matches", pattern="^(matches|scored|unscored|contacted|activity)$"),
     db: Session = Depends(get_db),
 ):
     query = db.query(Listing)
 
     if tab == "matches":
         query = query.filter(Listing.match_score >= 7, Listing.is_room_share == False)  # noqa: E712
-    elif tab == "reviewed":
-        query = query.filter(Listing.feedback.isnot(None))
-    elif tab == "unreviewed":
-        query = query.filter(Listing.feedback.is_(None), Listing.match_score.isnot(None))
+    elif tab == "scored":
+        query = query.filter(Listing.match_score.isnot(None))
+    elif tab == "unscored":
+        query = query.filter(Listing.match_score.is_(None))
+    elif tab == "contacted":
+        query = query.filter(Listing.feedback == "contacted")
 
     listings = query.order_by(Listing.match_score.desc().nullslast(), Listing.created_at.desc()).limit(200).all()
 
     unscored = db.query(Listing).filter(Listing.match_score.is_(None)).count()
+    scored = db.query(Listing).filter(Listing.match_score.isnot(None)).count()
     stats = {
         "total": db.query(Listing).count(),
         "matches": db.query(Listing).filter(Listing.match_score >= 7, Listing.is_room_share == False).count(),  # noqa: E712
-        "unreviewed": db.query(Listing).filter(Listing.feedback.is_(None), Listing.match_score.isnot(None)).count(),
-        "reviewed": db.query(Listing).filter(Listing.feedback.isnot(None)).count(),
+        "scored": scored,
         "unscored": unscored,
+        "contacted": db.query(Listing).filter(Listing.feedback == "contacted").count(),
     }
 
     last_run = db.query(SearchRun).order_by(SearchRun.started_at.desc()).first()

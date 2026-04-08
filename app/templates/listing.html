@@ -111,25 +111,26 @@
 
   <!-- Sidebar -->
   <div class="space-y-6">
-    <!-- Feedback -->
+    <!-- Status -->
     <div class="bg-white rounded-card shadow-card p-6">
-      <h2 class="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">Your Feedback</h2>
+      <h2 class="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-4">Status</h2>
       <form action="/listing/{{ listing.id }}/feedback" method="POST">
-        <div class="grid grid-cols-2 gap-2">
-          {% for val, label, emoji in [
-            ('good_match', 'Good Match', ''),
-            ('not_interested', 'Not Interested', ''),
-            ('wrong_price', 'Wrong Price', ''),
-            ('bad_location', 'Bad Location', ''),
-            ('already_gone', 'Already Gone', ''),
-            ('spam', 'Spam / Fake', '')
-          ] %}
-          <button type="submit" name="feedback" value="{{ val }}"
-                  class="px-3 py-2.5 rounded-btn border text-xs font-semibold transition
-                         {{ 'ring-2 ring-brand bg-red-50 border-brand text-brand' if listing.feedback == val else 'border-gray-200 text-near-black hover:bg-surface-secondary hover:shadow-card' }}">
-            {{ label }}
+        <div class="space-y-2">
+          <button type="submit" name="feedback" value="contacted"
+                  class="w-full px-4 py-3 rounded-btn border text-sm font-semibold transition
+                         {{ 'ring-2 ring-emerald-500 bg-emerald-50 border-emerald-500 text-emerald-700' if listing.feedback == 'contacted' else 'border-gray-200 text-near-black hover:bg-emerald-50 hover:border-emerald-300' }}">
+            Contacted
           </button>
-          {% endfor %}
+          <button type="submit" name="feedback" value="not_interested"
+                  class="w-full px-4 py-2.5 rounded-btn border text-xs font-medium transition
+                         {{ 'ring-2 ring-gray-400 bg-gray-50 border-gray-400 text-text-secondary' if listing.feedback == 'not_interested' else 'border-gray-200 text-text-secondary hover:bg-surface-secondary' }}">
+            Not Interested
+          </button>
+          <button type="submit" name="feedback" value="already_gone"
+                  class="w-full px-4 py-2.5 rounded-btn border text-xs font-medium transition
+                         {{ 'ring-2 ring-gray-400 bg-gray-50 border-gray-400 text-text-secondary' if listing.feedback == 'already_gone' else 'border-gray-200 text-text-secondary hover:bg-surface-secondary' }}">
+            Already Gone
+          </button>
         </div>
         <div class="mt-3">
           <textarea name="note" rows="2" placeholder="Optional note..."

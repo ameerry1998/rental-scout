@@ -4,22 +4,26 @@
 {% block content %}
 <!-- Stats bar -->
 {% if stats %}
-<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+<div class="grid grid-cols-2 sm:grid-cols-5 gap-4 mb-8">
   <div class="bg-white rounded-card shadow-card p-5 text-center">
     <div class="text-3xl font-bold text-near-black">{{ stats.get('total', 0) }}</div>
     <div class="text-sm text-text-secondary mt-1">Total Listings</div>
   </div>
   <div class="bg-white rounded-card shadow-card p-5 text-center">
     <div class="text-3xl font-bold text-brand">{{ stats.get('matches', 0) }}</div>
-    <div class="text-sm text-text-secondary mt-1">Matches (7+)</div>
+    <div class="text-sm text-text-secondary mt-1">Top Matches (7+)</div>
   </div>
   <div class="bg-white rounded-card shadow-card p-5 text-center">
-    <div class="text-3xl font-bold text-near-black">{{ stats.get('unreviewed', 0) }}</div>
-    <div class="text-sm text-text-secondary mt-1">Unreviewed</div>
+    <div class="text-3xl font-bold text-emerald-600">{{ stats.get('scored', 0) }}</div>
+    <div class="text-sm text-text-secondary mt-1">AI Scored</div>
   </div>
   <div class="bg-white rounded-card shadow-card p-5 text-center">
-    <div class="text-3xl font-bold text-near-black">{{ stats.get('reviewed', 0) }}</div>
-    <div class="text-sm text-text-secondary mt-1">Reviewed</div>
+    <div class="text-3xl font-bold {{ 'text-orange-500' if stats.get('unscored', 0) > 0 else 'text-near-black' }}">{{ stats.get('unscored', 0) }}</div>
+    <div class="text-sm text-text-secondary mt-1">Unscored</div>
+  </div>
+  <div class="bg-white rounded-card shadow-card p-5 text-center">
+    <div class="text-3xl font-bold text-blue-600">{{ stats.get('contacted', 0) }}</div>
+    <div class="text-sm text-text-secondary mt-1">Contacted</div>
   </div>
 </div>
 {% endif %}
@@ -161,7 +165,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <!-- Tabs -->
 <div class="flex gap-1 mb-6 border-b border-gray-100">
-  {% for t, label in [('matches', 'Top Matches'), ('unreviewed', 'Unreviewed'), ('all', 'All'), ('reviewed', 'Reviewed'), ('activity', 'Live Activity')] %}
+  {% for t, label in [('matches', 'Top Matches'), ('scored', 'All Scored'), ('unscored', 'Unscored'), ('contacted', 'Contacted'), ('activity', 'Live Activity')] %}
   <a href="/?tab={{ t }}"
      class="px-5 py-3 text-sm font-medium transition
             {{ 'text-near-black border-b-2 border-near-black' if tab == t else 'text-text-secondary hover:text-near-black' }}">
@@ -239,9 +243,12 @@ document.addEventListener('DOMContentLoaded', function() {
         <div class="flex items-center gap-2 flex-wrap">
           <h3 class="font-semibold text-near-black truncate text-base">{{ listing.title or 'Untitled' }}</h3>
           <span class="text-xs px-2 py-0.5 rounded-badge bg-surface-secondary text-text-secondary font-medium">{{ listing.source }}</span>
-          {% if listing.feedback %}
-          <span class="text-xs px-2 py-0.5 rounded-badge font-medium
-            {{ 'bg-green-50 text-green-700' if listing.feedback == 'good_match' else 'bg-red-50 text-red-700' }}">
+          {% if listing.feedback == 'contacted' %}
+          <span class="text-xs px-2 py-0.5 rounded-badge font-medium bg-emerald-50 text-emerald-700">
+            Contacted
+          </span>
+          {% elif listing.feedback %}
+          <span class="text-xs px-2 py-0.5 rounded-badge font-medium bg-gray-100 text-text-secondary">
             {{ listing.feedback | replace('_', ' ') }}
           </span>
           {% endif %}
