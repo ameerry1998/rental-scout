@@ -432,7 +432,10 @@ def _facebook_input() -> dict:
 
 def _rent_input() -> dict:
     return {
-        "startUrls": [{"url": f"https://www.rent.com/massachusetts/cambridge-apartments/beds-{config.BEDROOMS}/prices-less-than-{config.MAX_PRICE}"}],
+        "location": "Cambridge, MA",
+        "maxPrice": config.MAX_PRICE,
+        "minBeds": config.BEDROOMS,
+        "maxBeds": config.BEDROOMS,
         "maxItems": 200,
     }
 
@@ -572,7 +575,7 @@ def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[S
     log.info(f"Running {source} (actor: {scraper.actor_id})")
 
     actor_input = scraper.build_input()
-    run = client.actor(scraper.actor_id).call(run_input=actor_input)
+    run = client.actor(scraper.actor_id).call(run_input=actor_input, timeout_secs=600)
     dataset_items = client.dataset(run["defaultDatasetId"]).list_items().items
 
     log.info(f"  {source}: got {len(dataset_items)} raw items")
