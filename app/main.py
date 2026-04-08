@@ -196,11 +196,13 @@ def dashboard(
 
     listings = query.order_by(Listing.match_score.desc().nullslast(), Listing.created_at.desc()).limit(200).all()
 
+    unscored = db.query(Listing).filter(Listing.match_score.is_(None)).count()
     stats = {
         "total": db.query(Listing).count(),
         "matches": db.query(Listing).filter(Listing.match_score >= 7, Listing.is_room_share == False).count(),  # noqa: E712
         "unreviewed": db.query(Listing).filter(Listing.feedback.is_(None), Listing.match_score.isnot(None)).count(),
         "reviewed": db.query(Listing).filter(Listing.feedback.isnot(None)).count(),
+        "unscored": unscored,
     }
 
     last_run = db.query(SearchRun).order_by(SearchRun.started_at.desc()).first()
@@ -347,14 +349,49 @@ def trigger_all_run(
 
 
 # ---------------------------------------------------------------------------
-# Routes — Re-score (wipe old scores, re-run AI with current prompt)
+# Routes — Score unscored + Re-score all
 # ---------------------------------------------------------------------------
+
+@app.post("/score-remaining")
+def trigger_score_remaining(
+    background_tasks: BackgroundTasks,
+    secret: str = Query(...),
+):
+    """Score only listings that have no score yet (picks up where it left off)."""
+    if secret != config.CRON_SECRET:
+        raise HTTPException(403, "Invalid secret")
+
+    with _jobs_lock:
+        if "score" in _running_jobs:
+            return {"status": "already_running"}
+        _running_jobs.add("score")
+
+    def _bg():
+        from app.db import SessionLocal
+        session = SessionLocal()
+        try:
+            unscored = session.query(Listing).filter(Listing.match_score.is_(None)).all()
+            log.info(f"Scoring {len(unscored)} unscored listings (batch mode)")
+            if unscored:
+                matches = score_and_update_batch(unscored, session, batch_size=5)
+                log.info(f"Scoring complete: {matches} matches out of {len(unscored)}")
+            else:
+                log.info("No unscored listings found")
+        finally:
+            session.close()
+            with _jobs_lock:
+                _running_jobs.discard("score")
+
+    background_tasks.add_task(_bg)
+    return {"status": "started", "message": "Scoring unscored listings"}
+
 
 @app.post("/rescore")
 def trigger_rescore(
     background_tasks: BackgroundTasks,
     secret: str = Query(...),
 ):
+    """Wipe ALL scores and re-score everything with current prompt."""
     if secret != config.CRON_SECRET:
         raise HTTPException(403, "Invalid secret")
 

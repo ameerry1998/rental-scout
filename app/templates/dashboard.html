@@ -33,6 +33,11 @@
       <button onclick="runSource('all')" class="px-4 py-2 bg-near-black text-white text-sm font-medium rounded-btn hover:bg-brand transition">
         Run All
       </button>
+      {% if stats.get('unscored', 0) > 0 %}
+      <button onclick="scoreRemaining()" class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-btn hover:bg-emerald-500 transition">
+        Score {{ stats.get('unscored', 0) }} Remaining
+      </button>
+      {% endif %}
       <button onclick="runRescore()" class="px-4 py-2 bg-brand text-white text-sm font-medium rounded-btn hover:bg-brand-dark transition">
         Re-score All
       </button>
@@ -111,6 +116,10 @@ function runSource(source) {
   window.location.href = '/?tab=activity&action=run&source=' + source;
 }
 
+function scoreRemaining() {
+  window.location.href = '/?tab=activity&action=score-remaining';
+}
+
 function runRescore() {
   if (!confirm('Re-score all listings with the current AI prompt? This will take a few minutes.')) return;
   window.location.href = '/?tab=activity&action=rescore';
@@ -122,27 +131,24 @@ document.addEventListener('DOMContentLoaded', function() {
   const action = params.get('action');
   const source = params.get('source');
 
+  function fireAction(url) {
+    fetch(url, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => { startPolling(); })
+      .catch(e => {
+        const c = document.getElementById('log-lines');
+        if (c) c.innerHTML = '<div class="text-red-400">Failed to start: ' + e + '</div>';
+      });
+    history.replaceState(null, '', '/?tab=activity');
+    startPolling();
+  }
+
   if (action === 'run' && source) {
-    fetch('/run/' + source + '?secret={{ cron_secret }}', { method: 'POST' })
-      .then(r => r.json())
-      .then(d => { startPolling(); })
-      .catch(e => {
-        const c = document.getElementById('log-lines');
-        if (c) c.innerHTML = '<div class="text-red-400">Failed to start: ' + e + '</div>';
-      });
-    // Clean URL
-    history.replaceState(null, '', '/?tab=activity');
-    startPolling();
+    fireAction('/run/' + source + '?secret={{ cron_secret }}');
   } else if (action === 'rescore') {
-    fetch('/rescore?secret={{ cron_secret }}', { method: 'POST' })
-      .then(r => r.json())
-      .then(d => { startPolling(); })
-      .catch(e => {
-        const c = document.getElementById('log-lines');
-        if (c) c.innerHTML = '<div class="text-red-400">Failed to start: ' + e + '</div>';
-      });
-    history.replaceState(null, '', '/?tab=activity');
-    startPolling();
+    fireAction('/rescore?secret={{ cron_secret }}');
+  } else if (action === 'score-remaining') {
+    fireAction('/score-remaining?secret={{ cron_secret }}');
   }
 
   // Auto-poll if we're on the activity tab
