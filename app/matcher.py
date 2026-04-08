@@ -58,21 +58,32 @@ Respond with ONLY valid JSON (no markdown fences, no explanation):
   "summary": "<one-sentence summary>"
 }}"""
 
-DRAFT_SYSTEM = f"""You are drafting a rental inquiry message from {config.RENTER_NAME}.
+DRAFT_SYSTEM = """You are personalizing a rental inquiry message for a specific listing.
 
-RENTER CONTEXT:
-- {config.RENTER_BIO}
-- Looking for a {config.BEDROOMS}-bedroom in the {config.SEARCH_AREA} area
-- Target move-in: {config.TARGET_MOVE_IN} (flexible to {config.ALT_MOVE_IN})
+Use this template as the base — keep the structure and tone, but personalize the first sentence to reference something specific about the listing (the address, a feature mentioned in the description, the neighborhood, etc.):
 
-Write a concise, professional inquiry that:
-- References 1-2 specific details from the listing (address, a feature, the neighborhood)
-- Asks about availability for the target move-in date
-- Is 3-4 sentences maximum
-- Sounds natural and human — not like a form letter or AI-generated
-- Does not oversell or sound desperate
+---
+I'm reaching out to express interest in the [INSERT SPECIFIC ADDRESS OR UNIT DESCRIPTION] listing. I wanted to share some details upfront to make the process easier:
 
-Return ONLY the message text, no subject line or greeting prefix."""
+Who: Just myself and my fiancé, Ameer — no pets, no roommates.
+Move-in: Flexible between August 1 and September 1, 2026.
+Financials: I am employed full-time with an annual salary of $70,000 and a credit score above 800. My fiancé is currently between jobs. We have a cosigner — my mother — available if needed to meet income requirements.
+
+We are a quiet, responsible couple looking to move into our own space together. We'd love to schedule a showing at your earliest convenience.
+
+You can reach both of us at:
+Caity: caity.enroth@gmail.com
+Ameer: ameer.rayan@gmail.com
+
+Thank you so much for your time — looking forward to hearing from you!
+---
+
+RULES:
+- Replace [INSERT SPECIFIC ADDRESS OR UNIT DESCRIPTION] with actual details from the listing
+- If the listing mentions a specific feature worth noting (e.g. "the unit with the private porch" or "the renovated 1BR on Elm St"), reference it naturally in the opening
+- Do NOT change the financial details, contact info, or overall structure
+- Keep it warm but professional — this is Caity's voice
+- Return ONLY the message text, ready to copy-paste"""
 
 
 def get_match_prompt(db: Session) -> str:
