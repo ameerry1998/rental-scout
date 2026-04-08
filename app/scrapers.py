@@ -340,27 +340,6 @@ def _transform_realtor(item: dict) -> ScraperResult | None:
     )
 
 
-def _transform_redfin(item: dict) -> ScraperResult | None:
-    prop_id = item.get("propertyId") or item.get("mlsId") or item.get("listingId") or item.get("id") or ""
-    return ScraperResult(
-        source="redfin",
-        source_id=str(prop_id) or _hash_id("redfin", item.get("address", "")),
-        url=item.get("url") or "",
-        title=item.get("title") or item.get("address", ""),
-        price=_safe_int(item.get("price") or item.get("listPrice")),
-        bedrooms=_safe_float(item.get("beds") or item.get("bedrooms")),
-        bathrooms=_safe_float(item.get("baths") or item.get("bathrooms")),
-        sqft=_safe_int(item.get("sqFt") or item.get("sqft")),
-        address=item.get("address") or "",
-        neighborhood=item.get("neighborhood") or "",
-        latitude=_safe_float(item.get("latitude") or item.get("lat")),
-        longitude=_safe_float(item.get("longitude") or item.get("lng")),
-        description=item.get("description") or "",
-        images=item.get("images", []) or item.get("photos", []) or [],
-        raw_data=item,
-    )
-
-
 def _transform_facebook(item: dict) -> ScraperResult | None:
     post_id = item.get("id") or item.get("postId") or ""
     price_raw = item.get("price") or ""
@@ -423,12 +402,9 @@ def _zillow_input() -> dict:
 
 def _apartments_input() -> dict:
     return {
-        "sources": ["apartments.com", "zumper"],
+        "providers": ["zumper", "apartments"],
         "location": "Cambridge, MA",
         "listingType": "rent",
-        "minBeds": config.BEDROOMS,
-        "maxBeds": config.BEDROOMS,
-        "maxPrice": config.MAX_PRICE,
         "maxItems": 200,
     }
 
@@ -440,33 +416,18 @@ def _realtor_input() -> dict:
     }
 
 
-def _redfin_input() -> dict:
-    return {
-        "searchUrl": (
-            "https://www.redfin.com/city/3312/MA/Cambridge/apartments-for-rent"
-            f"/filter/max-price={config.MAX_PRICE},min-beds={config.BEDROOMS},max-beds={config.BEDROOMS}"
-        ),
-        "maxItems": 200,
-    }
-
-
 def _facebook_input() -> dict:
     return {
-        "searchQuery": f"{config.BEDROOMS} bedroom apartment Cambridge MA",
+        "searchQuery": f"{config.BEDROOMS} bedroom apartment",
         "location": "Cambridge, Massachusetts",
-        "category": "propertyrentals",
-        "maxPrice": config.MAX_PRICE,
+        "category": "property_rentals",
         "maxItems": 100,
     }
 
 
 def _rent_input() -> dict:
     return {
-        "startUrls": [
-            f"https://www.rent.com/massachusetts/cambridge-apartments"
-            f"/beds-{config.BEDROOMS}"
-            f"/prices-less-than-{config.MAX_PRICE}"
-        ],
+        "startUrls": [{"url": f"https://www.rent.com/massachusetts/cambridge-apartments/beds-{config.BEDROOMS}/prices-less-than-{config.MAX_PRICE}"}],
         "maxItems": 200,
     }
 
@@ -488,13 +449,99 @@ APIFY_SCRAPERS: dict[str, ApifyScraperDef] = {
     "zillow": ApifyScraperDef("zillow", config.ZILLOW_ACTOR, config.ENABLE_ZILLOW, _zillow_input, _transform_zillow),
     "apartments": ApifyScraperDef("apartments", config.APARTMENTS_ACTOR, config.ENABLE_APARTMENTS, _apartments_input, _transform_aggregator),
     "realtor": ApifyScraperDef("realtor", config.REALTOR_ACTOR, config.ENABLE_REALTOR, _realtor_input, _transform_realtor),
-    "redfin": ApifyScraperDef("redfin", config.REDFIN_ACTOR, config.ENABLE_REDFIN, _redfin_input, _transform_redfin),
     "facebook": ApifyScraperDef("facebook", config.FACEBOOK_ACTOR, config.ENABLE_FACEBOOK, _facebook_input, _transform_facebook),
     "rent": ApifyScraperDef("rent", config.RENT_ACTOR, config.ENABLE_RENT, _rent_input, _transform_rent),
 }
 
+# Direct scrapers (like Craigslist) — these don't use Apify
+DIRECT_SCRAPERS = ["craigslist", "bostonpads"]
+
 # All available scraper names (for the dashboard + routes)
-SCRAPER_NAMES: list[str] = ["craigslist"] + list(APIFY_SCRAPERS.keys())
+SCRAPER_NAMES: list[str] = DIRECT_SCRAPERS + list(APIFY_SCRAPERS.keys())
+
+
+# ---------------------------------------------------------------------------
+# BostonPads — Direct HTTP scraper
+# ---------------------------------------------------------------------------
+
+def _scrape_bostonpads(known_ids: set[str] | None = None) -> list[ScraperResult]:
+    """Scrape BostonPads Cambridge 1BR listings directly."""
+    known_ids = known_ids or set()
+    search_url = f"https://bostonpads.com/cambridge-ma-apartments/?beds={config.BEDROOMS}&maxprice={config.MAX_PRICE}"
+
+    log.info(f"BostonPads: fetching {search_url}")
+    r = httpx.get(search_url, follow_redirects=True, headers=HEADERS, timeout=30)
+    r.raise_for_status()
+
+    soup = BeautifulSoup(r.text, "html.parser")
+    cards = soup.select(".bpo-listing-block-outer")
+    log.info(f"BostonPads: found {len(cards)} listing cards")
+
+    results: list[ScraperResult] = []
+    for card in cards:
+        try:
+            link = card.select_one("a[href*='cambridge-ma-apartments/cambridge-']")
+            if not link:
+                continue
+
+            url = link.get("href", "")
+            id_match = re.search(r"cambridge-(\d+)", url)
+            listing_id = id_match.group(1) if id_match else _hash_id("bostonpads", url)
+
+            if listing_id in known_ids:
+                continue
+
+            text = card.get_text(" | ", strip=True)
+
+            price_m = re.search(r"\$([\d,]+)", text)
+            avail_m = re.search(r"Available:?\s*([\d-]+)", text)
+            beds_m = re.search(r"(\d+)\s*Beds?", text)
+            baths_m = re.search(r"(\d+)\s*Baths?", text)
+            loc_m = re.search(r"at\s+(.+?),\s*(Cambridge|Somerville)", text)
+
+            neighborhood = loc_m.group(1).strip() + ", " + loc_m.group(2) if loc_m else "Cambridge"
+
+            results.append(ScraperResult(
+                source="bostonpads",
+                source_id=listing_id,
+                url=url,
+                title=f"{neighborhood} - {beds_m.group(1) if beds_m else '1'}BR" if loc_m else f"Cambridge listing {listing_id}",
+                price=_safe_int(price_m.group(1).replace(",", "")) if price_m else None,
+                bedrooms=_safe_float(beds_m.group(1)) if beds_m else None,
+                bathrooms=_safe_float(baths_m.group(1)) if baths_m else None,
+                neighborhood=neighborhood,
+                description=text[:1000],
+                raw_data={"url": url, "card_text": text[:500]},
+            ))
+        except Exception as e:
+            log.warning(f"  BostonPads card parse error: {e}")
+
+    # Fetch detail pages for contact info (batch, not all)
+    for i, result in enumerate(results[:30]):
+        try:
+            detail_r = httpx.get(result.url, follow_redirects=True, headers=HEADERS, timeout=15)
+            detail_soup = BeautifulSoup(detail_r.text, "html.parser")
+
+            # Get full description
+            desc = detail_soup.select_one("[class*=description], .bpo-listing-details-desc")
+            if desc:
+                result.description = desc.get_text(strip=True)[:2000]
+
+            # Get contact info
+            contact = detail_soup.select_one("[class*=contact], [class*=agent]")
+            if contact:
+                result.contact_info = contact.get_text(" | ", strip=True)[:200]
+
+            # Get images
+            imgs = detail_soup.select("img[src*='bostonpads.com/media']")
+            result.images = [img["src"] for img in imgs[:5]]
+
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+    log.info(f"BostonPads: got {len(results)} listings")
+    return results
 
 
 def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[ScraperResult]:
@@ -506,6 +553,9 @@ def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[S
             log.info("Craigslist is disabled")
             return []
         return _scrape_craigslist(known_ids=known_ids)
+
+    if source == "bostonpads":
+        return _scrape_bostonpads(known_ids=known_ids)
 
     scraper = APIFY_SCRAPERS.get(source)
     if not scraper:
