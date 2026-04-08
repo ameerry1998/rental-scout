@@ -47,7 +47,7 @@ TARGET_NEIGHBORHOODS = _list(
 
 # --- Apify actor IDs (verified against Apify Store 2026-04) ---
 CRAIGSLIST_ACTOR = os.environ.get("CRAIGSLIST_ACTOR", "easyapi/craigslist-search-results-scraper")
-ZILLOW_ACTOR = os.environ.get("ZILLOW_ACTOR", "maxcopell/zillow-scraper")
+ZILLOW_ACTOR = os.environ.get("ZILLOW_ACTOR", "crawlerbros/zillow-scraper")
 APARTMENTS_ACTOR = os.environ.get("APARTMENTS_ACTOR", "tri_angle/real-estate-aggregator")
 REALTOR_ACTOR = os.environ.get("REALTOR_ACTOR", "crawlerbros/realtor-scraper")
 REDFIN_ACTOR = os.environ.get("REDFIN_ACTOR", "tri_angle/redfin-search")

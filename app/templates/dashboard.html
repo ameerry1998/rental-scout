@@ -269,7 +269,7 @@ document.addEventListener('DOMContentLoaded', function() {
           <span class="text-xs font-semibold px-2.5 py-1 rounded-badge
             {{ 'bg-blue-50 text-blue-700' if '09-01' in listing.availability_date or '08-01' in listing.availability_date else
                'bg-orange-50 text-orange-600' }}">
-            Move-in {{ listing.availability_date }}
+            {{ listing.availability_date | friendly_date }}
           </span>
           {% endif %}
           {% if listing.bedrooms %}<span class="text-sm text-text-secondary">{{ listing.bedrooms | int }}bd</span>{% endif %}

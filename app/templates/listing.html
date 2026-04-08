@@ -35,7 +35,7 @@
             <span class="text-sm font-semibold px-3 py-1 rounded-badge
               {{ 'bg-blue-50 text-blue-700' if '09-01' in listing.availability_date or '08-01' in listing.availability_date else
                  'bg-orange-50 text-orange-600' }}">
-              Move-in {{ listing.availability_date }}
+              {{ listing.availability_date | friendly_date }}
             </span>
             {% endif %}
           </div>

@@ -255,31 +255,28 @@ def _fetch_craigslist_detail(listing: dict) -> ScraperResult | None:
 # ---------------------------------------------------------------------------
 
 def _transform_zillow(item: dict) -> ScraperResult | None:
+    # crawlerbros/zillow-scraper output shape
     zpid = item.get("zpid") or item.get("id") or ""
     price = _safe_int(item.get("price") or item.get("unformattedPrice"))
-    address_data = item.get("address", {})
-    if isinstance(address_data, dict):
-        address = address_data.get("streetAddress", "")
-        neighborhood = address_data.get("neighborhood", "") or address_data.get("city", "")
-    else:
-        address = str(address_data)
-        neighborhood = ""
+    address = item.get("address") or ""
+    city = item.get("city") or ""
+    neighborhood = city
 
     return ScraperResult(
         source="zillow",
-        source_id=str(zpid),
-        url=item.get("detailUrl") or item.get("url", ""),
-        title=item.get("title") or item.get("statusText") or address,
+        source_id=str(zpid) or _hash_id("zillow", address),
+        url=item.get("url") or item.get("detailUrl", ""),
+        title=item.get("name") or item.get("title") or address,
         price=price,
-        bedrooms=_safe_float(item.get("bedrooms") or item.get("beds")),
-        bathrooms=_safe_float(item.get("bathrooms") or item.get("baths")),
-        sqft=_safe_int(item.get("livingArea") or item.get("area")),
+        bedrooms=_safe_float(item.get("beds") or item.get("bedrooms")),
+        bathrooms=_safe_float(item.get("baths") or item.get("bathrooms")),
+        sqft=_safe_int(item.get("sqft") or item.get("livingArea")),
         address=address,
         neighborhood=neighborhood,
-        latitude=_safe_float(item.get("latitude") or item.get("lat")),
-        longitude=_safe_float(item.get("longitude") or item.get("lng")),
+        latitude=_safe_float(item.get("latitude")),
+        longitude=_safe_float(item.get("longitude")),
         description=item.get("description") or "",
-        images=item.get("images", []) or item.get("photos", []) or [],
+        images=item.get("photos", []) or item.get("images", []) or [],
         raw_data=item,
     )
 
@@ -312,45 +309,33 @@ def _transform_aggregator(item: dict) -> ScraperResult | None:
 
 
 def _transform_realtor(item: dict) -> ScraperResult | None:
-    prop_id = item.get("property_id") or item.get("listing_id") or item.get("id") or ""
-    location = item.get("location", {}) or {}
-    address_data = location.get("address", {}) or {}
-    coord = location.get("coordinate", {}) or {}
-
-    desc = item.get("description", {})
-    if isinstance(desc, dict):
-        desc_text = desc.get("text", "")
-        beds = _safe_float(desc.get("beds"))
-        baths = _safe_float(desc.get("baths"))
-        sqft = _safe_int(desc.get("sqft"))
-    else:
-        desc_text = str(desc) if desc else ""
-        beds = _safe_float(item.get("beds") or item.get("bedrooms"))
-        baths = _safe_float(item.get("baths") or item.get("bathrooms"))
-        sqft = _safe_int(item.get("sqft"))
+    # crawlerbros/realtor-scraper output shape
+    prop_id = item.get("id") or item.get("listingId") or ""
+    addr = item.get("address", {}) or {}
+    coords = item.get("coordinates", {}) or {}
 
     full_address = " ".join(filter(None, [
-        address_data.get("line", "") or item.get("address", ""),
-        address_data.get("city", "") or item.get("city", ""),
-        address_data.get("state_code", ""),
-        address_data.get("postal_code", ""),
-    ]))
+        addr.get("street", ""),
+        addr.get("city", ""),
+        addr.get("state", ""),
+        addr.get("postalCode", ""),
+    ])) if isinstance(addr, dict) else str(addr)
 
     return ScraperResult(
         source="realtor",
         source_id=str(prop_id) or _hash_id("realtor", full_address),
-        url=item.get("href") or item.get("url", ""),
-        title=item.get("title") or full_address,
-        price=_safe_int(item.get("list_price") or item.get("price")),
-        bedrooms=beds,
-        bathrooms=baths,
-        sqft=sqft,
+        url=item.get("url", ""),
+        title=item.get("name") or full_address,
+        price=_safe_int(item.get("listPrice") or item.get("price")),
+        bedrooms=_safe_float(item.get("beds")),
+        bathrooms=_safe_float(item.get("baths") or item.get("bathsFull")),
+        sqft=_safe_int(item.get("sqft")),
         address=full_address,
-        neighborhood=address_data.get("neighborhood_name", ""),
-        latitude=_safe_float(coord.get("lat") or item.get("latitude")),
-        longitude=_safe_float(coord.get("lon") or item.get("longitude")),
-        description=desc_text,
-        images=[p.get("href", "") for p in (item.get("photos", []) or [])[:5]],
+        neighborhood=addr.get("city", "") if isinstance(addr, dict) else "",
+        latitude=_safe_float(coords.get("lat")),
+        longitude=_safe_float(coords.get("lng")),
+        description=item.get("description") or "",
+        images=[p if isinstance(p, str) else p.get("href", "") for p in (item.get("photos", []) or [])[:5]],
         raw_data=item,
     )
 
@@ -403,13 +388,14 @@ def _transform_facebook(item: dict) -> ScraperResult | None:
 
 
 def _transform_rent(item: dict) -> ScraperResult | None:
+    # benthepythondev/rent-com-scraper output shape
     prop_id = item.get("id") or item.get("propertyId") or ""
     return ScraperResult(
         source="rent",
-        source_id=str(prop_id) or _hash_id("rent", item.get("name", "")),
+        source_id=str(prop_id) or _hash_id("rent", item.get("property_name", "")),
         url=item.get("url") or "",
-        title=item.get("name") or item.get("title", ""),
-        price=_safe_int(item.get("price") or item.get("rent")),
+        title=item.get("property_name") or item.get("name") or item.get("title", ""),
+        price=_safe_int(item.get("price") or item.get("price_text", "").replace("$", "").replace(",", "")),
         bedrooms=_safe_float(item.get("bedrooms") or item.get("beds")),
         bathrooms=_safe_float(item.get("bathrooms") or item.get("baths")),
         sqft=_safe_int(item.get("sqft")),
@@ -417,9 +403,10 @@ def _transform_rent(item: dict) -> ScraperResult | None:
         neighborhood=item.get("neighborhood") or "",
         latitude=_safe_float(item.get("latitude")),
         longitude=_safe_float(item.get("longitude")),
-        description=item.get("description") or "",
-        images=item.get("images", []) or item.get("photos", []) or [],
+        description=item.get("description") or item.get("availability") or "",
+        images=item.get("photos", []) or item.get("images", []) or [],
         raw_data=item,
+        contact_info=item.get("phone") or "",
     )
 
 
@@ -429,18 +416,7 @@ def _transform_rent(item: dict) -> ScraperResult | None:
 
 def _zillow_input() -> dict:
     return {
-        "searchUrls": [
-            f"https://www.zillow.com/cambridge-ma/rentals/"
-            f"{config.BEDROOMS}-_beds/"
-            f"?searchQueryState=%7B%22pagination%22%3A%7B%7D%2C"
-            f"%22mapBounds%22%3A%7B%7D%2C"
-            f"%22filterState%22%3A%7B%22price%22%3A%7B%22max%22%3A{config.MAX_PRICE}%7D%2C"
-            f"%22beds%22%3A%7B%22min%22%3A{config.BEDROOMS}%2C%22max%22%3A{config.BEDROOMS}%7D%2C"
-            f"%22fr%22%3A%7B%22value%22%3Atrue%7D%2C%22fsba%22%3A%7B%22value%22%3Afalse%7D%2C"
-            f"%22fsbo%22%3A%7B%22value%22%3Afalse%7D%2C%22nc%22%3A%7B%22value%22%3Afalse%7D%2C"
-            f"%22cmsn%22%3A%7B%22value%22%3Afalse%7D%2C%22auc%22%3A%7B%22value%22%3Afalse%7D%2C"
-            f"%22fore%22%3A%7B%22value%22%3Afalse%7D%7D%7D"
-        ],
+        "startUrls": [{"url": f"https://www.zillow.com/cambridge-ma/rentals/{config.BEDROOMS}-_beds/"}],
         "maxItems": 200,
     }
 
@@ -459,12 +435,7 @@ def _apartments_input() -> dict:
 
 def _realtor_input() -> dict:
     return {
-        "startUrls": [
-            f"https://www.realtor.com/apartments/Cambridge_MA"
-            f"/beds-{config.BEDROOMS}"
-            f"/price-na-{config.MAX_PRICE}"
-            f"/type-apartment"
-        ],
+        "startUrls": [{"url": f"https://www.realtor.com/apartments/Cambridge_MA/beds-{config.BEDROOMS}/price-na-{config.MAX_PRICE}"}],
         "maxItems": 200,
     }
 

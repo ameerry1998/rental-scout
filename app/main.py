@@ -47,6 +47,18 @@ app = FastAPI(title="Rental Scout", version="1.0.0")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 
 
+def _friendly_date(val: str) -> str:
+    """Convert '2026-09-01' → 'September 1' or return as-is if unparseable."""
+    try:
+        d = datetime.strptime(val, "%Y-%m-%d")
+        return d.strftime("%B %-d")
+    except (ValueError, TypeError):
+        return val
+
+
+templates.env.filters["friendly_date"] = _friendly_date
+
+
 @app.on_event("startup")
 def startup():
     init_db()
