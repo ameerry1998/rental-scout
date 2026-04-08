@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}{{ listing.title or 'Listing' }} — Rental Scout{% endblock %}
+
+{% block content %}
+<a href="/" class="text-sm text-gray-500 hover:text-gray-700 mb-4 inline-block">&larr; Back to dashboard</a>
+
+<div class="grid lg:grid-cols-3 gap-6">
+  <!-- Main content -->
+  <div class="lg:col-span-2 space-y-6">
+    <!-- Header -->
+    <div class="bg-white rounded-lg border p-6">
+      <div class="flex items-start gap-4">
+        <div class="flex-shrink-0 w-16 h-16 rounded-lg border-2 flex flex-col items-center justify-center
+                    score-{{ listing.score_color }}">
+          <span class="text-2xl font-bold leading-none">{{ listing.match_score if listing.match_score is not none else '?' }}</span>
+          <span class="text-xs mt-0.5">/10</span>
+        </div>
+        <div class="flex-1">
+          <h1 class="text-xl font-bold text-gray-900">{{ listing.title or 'Untitled' }}</h1>
+          <div class="flex items-center gap-3 mt-2 text-sm text-gray-500 flex-wrap">
+            {% if listing.price %}
+            <span class="text-lg font-semibold text-gray-900">${{ '{:,}'.format(listing.price) }}/mo</span>
+            {% endif %}
+            {% if listing.bedrooms %}<span>{{ listing.bedrooms | int }} bed</span>{% endif %}
+            {% if listing.bathrooms %}<span>{{ listing.bathrooms | int }} bath</span>{% endif %}
+            {% if listing.sqft %}<span>{{ '{:,}'.format(listing.sqft) }} sqft</span>{% endif %}
+          </div>
+          <div class="flex items-center gap-3 mt-2 text-sm text-gray-500 flex-wrap">
+            {% if listing.address %}<span>{{ listing.address }}</span>{% endif %}
+            {% if listing.neighborhood %}<span class="text-blue-600">{{ listing.neighborhood }}</span>{% endif %}
+            <span class="px-2 py-0.5 rounded bg-gray-100 text-xs">{{ listing.source }}</span>
+          </div>
+        </div>
+      </div>
+
+      {% if listing.url %}
+      <a href="{{ listing.url }}" target="_blank" rel="noopener"
+         class="inline-block mt-4 text-sm text-blue-600 hover:underline">
+        View original listing &rarr;
+      </a>
+      {% endif %}
+    </div>
+
+    <!-- AI Analysis -->
+    <div class="bg-white rounded-lg border p-6">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">AI Analysis</h2>
+
+      {% if listing.availability_date %}
+      <div class="mb-3">
+        <span class="text-sm font-medium text-gray-700">Availability:</span>
+        <span class="ml-2 px-2 py-0.5 rounded bg-blue-50 text-blue-700 text-sm">
+          {{ listing.availability_date }}
+        </span>
+      </div>
+      {% endif %}
+
+      {% if listing.summary %}
+      <p class="text-gray-700 mb-4">{{ listing.summary }}</p>
+      {% endif %}
+
+      {% if listing.match_reasons %}
+      <div class="mb-3">
+        <span class="text-sm font-medium text-green-700">Strengths:</span>
+        <ul class="mt-1 space-y-1">
+          {% for reason in listing.match_reasons %}
+          <li class="text-sm text-gray-600 flex items-start gap-2">
+            <span class="text-green-500 mt-0.5">+</span>
+            {{ reason }}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      {% if listing.match_concerns %}
+      <div>
+        <span class="text-sm font-medium text-red-700">Concerns:</span>
+        <ul class="mt-1 space-y-1">
+          {% for concern in listing.match_concerns %}
+          <li class="text-sm text-gray-600 flex items-start gap-2">
+            <span class="text-red-500 mt-0.5">-</span>
+            {{ concern }}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Full description -->
+    <div class="bg-white rounded-lg border p-6">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Full Description</h2>
+      <div class="text-sm text-gray-700 whitespace-pre-wrap leading-relaxed">{{ listing.description or 'No description available.' }}</div>
+    </div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="space-y-6">
+    <!-- Feedback -->
+    <div class="bg-white rounded-lg border p-6">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Your Feedback</h2>
+      <form action="/listing/{{ listing.id }}/feedback" method="POST">
+        <div class="grid grid-cols-2 gap-2">
+          {% for val, label, color in [
+            ('good_match', 'Good Match', 'green'),
+            ('not_interested', 'Not Interested', 'gray'),
+            ('wrong_price', 'Wrong Price', 'red'),
+            ('bad_location', 'Bad Location', 'orange'),
+            ('already_gone', 'Already Gone', 'purple'),
+            ('spam', 'Spam / Fake', 'red')
+          ] %}
+          <button type="submit" name="feedback" value="{{ val }}"
+                  class="feedback-btn px-3 py-2 rounded border text-xs font-medium
+                         {{ 'ring-2 ring-' + color + '-500 bg-' + color + '-50' if listing.feedback == val else 'hover:bg-gray-50' }}">
+            {{ label }}
+          </button>
+          {% endfor %}
+        </div>
+        <div class="mt-3">
+          <textarea name="note" rows="2" placeholder="Optional note..."
+                    class="w-full text-sm border rounded-lg px-3 py-2 text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500">{{ listing.feedback_note or '' }}</textarea>
+        </div>
+      </form>
+    </div>
+
+    <!-- Draft message -->
+    <div class="bg-white rounded-lg border p-6">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide">Draft Message</h2>
+        <form action="/listing/{{ listing.id }}/draft" method="POST" class="inline">
+          <button type="submit" class="text-xs text-blue-600 hover:underline">
+            {{ 'Regenerate' if listing.draft_message else 'Generate' }}
+          </button>
+        </form>
+      </div>
+      {% if listing.draft_message %}
+      <div class="text-sm text-gray-700 whitespace-pre-wrap bg-gray-50 rounded p-3 border">{{ listing.draft_message }}</div>
+      <button onclick="navigator.clipboard.writeText(document.querySelector('.draft-text').innerText); this.textContent='Copied!'; setTimeout(() => this.textContent='Copy to clipboard', 2000)"
+              class="mt-2 text-xs text-blue-600 hover:underline">
+        Copy to clipboard
+      </button>
+      <div class="draft-text hidden">{{ listing.draft_message }}</div>
+      {% else %}
+      <p class="text-sm text-gray-400 italic">No draft yet. Click Generate to create one.</p>
+      {% endif %}
+    </div>
+
+    <!-- Contact info -->
+    {% if listing.contact_info %}
+    <div class="bg-white rounded-lg border p-6">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Contact</h2>
+      <p class="text-sm text-gray-700">{{ listing.contact_info }}</p>
+    </div>
+    {% endif %}
+
+    <!-- Images -->
+    {% if listing.images %}
+    <div class="bg-white rounded-lg border p-6">
+      <h2 class="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">Photos</h2>
+      <div class="space-y-2">
+        {% for img in listing.images[:6] %}
+        {% if img is string %}
+        <img src="{{ img }}" alt="Listing photo" class="w-full rounded border" loading="lazy"
+             onerror="this.style.display='none'">
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

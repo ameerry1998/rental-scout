@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Rental Scout{% endblock %}
+
+{% block content %}
+<!-- Stats bar -->
+{% if stats %}
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+  <div class="bg-white rounded-lg border p-4 text-center">
+    <div class="text-2xl font-bold text-gray-900">{{ stats.get('total', 0) }}</div>
+    <div class="text-xs text-gray-500 mt-1">Total Listings</div>
+  </div>
+  <div class="bg-white rounded-lg border p-4 text-center">
+    <div class="text-2xl font-bold text-green-600">{{ stats.get('matches', 0) }}</div>
+    <div class="text-xs text-gray-500 mt-1">Matches (7+)</div>
+  </div>
+  <div class="bg-white rounded-lg border p-4 text-center">
+    <div class="text-2xl font-bold text-yellow-600">{{ stats.get('unreviewed', 0) }}</div>
+    <div class="text-xs text-gray-500 mt-1">Unreviewed</div>
+  </div>
+  <div class="bg-white rounded-lg border p-4 text-center">
+    <div class="text-2xl font-bold text-blue-600">{{ stats.get('reviewed', 0) }}</div>
+    <div class="text-xs text-gray-500 mt-1">Reviewed</div>
+  </div>
+</div>
+{% endif %}
+
+<!-- Tabs -->
+<div class="flex gap-2 mb-6 border-b border-gray-200 pb-2">
+  {% for t, label in [('matches', 'Top Matches'), ('unreviewed', 'Unreviewed'), ('all', 'All'), ('reviewed', 'Reviewed')] %}
+  <a href="/?tab={{ t }}"
+     class="px-4 py-2 rounded-t text-sm font-medium
+            {{ 'bg-white border border-b-white text-gray-900 -mb-[2px]' if tab == t else 'text-gray-500 hover:text-gray-700' }}">
+    {{ label }}
+  </a>
+  {% endfor %}
+</div>
+
+<!-- Run history -->
+{% if tab == 'runs' %}
+<div class="bg-white rounded-lg border overflow-hidden">
+  <table class="w-full text-sm">
+    <thead class="bg-gray-50 text-left text-gray-500">
+      <tr>
+        <th class="px-4 py-3">Date</th>
+        <th class="px-4 py-3">Status</th>
+        <th class="px-4 py-3">Sources</th>
+        <th class="px-4 py-3">New</th>
+        <th class="px-4 py-3">Matches</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for run in runs %}
+      <tr class="border-t">
+        <td class="px-4 py-3">{{ run.started_at.strftime('%b %d, %I:%M %p') }}</td>
+        <td class="px-4 py-3">
+          <span class="px-2 py-0.5 rounded text-xs font-medium
+            {{ 'bg-green-100 text-green-700' if run.status == 'completed' else
+               'bg-red-100 text-red-700' if run.status == 'failed' else
+               'bg-yellow-100 text-yellow-700' }}">
+            {{ run.status }}
+          </span>
+        </td>
+        <td class="px-4 py-3 text-gray-500">{{ (run.sources_scraped or []) | join(', ') }}</td>
+        <td class="px-4 py-3">{{ run.new_listings_found or 0 }}</td>
+        <td class="px-4 py-3 text-green-600 font-medium">{{ run.matches_found or 0 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% else %}
+<!-- Listing cards -->
+{% if not listings %}
+<div class="text-center py-16 text-gray-400">
+  <p class="text-lg">No listings yet.</p>
+  <p class="text-sm mt-2">Trigger a run to start scraping.</p>
+</div>
+{% endif %}
+
+<div class="grid gap-4">
+  {% for listing in listings %}
+  <a href="/listing/{{ listing.id }}" class="block bg-white rounded-lg border hover:border-gray-300 hover:shadow-sm transition p-4">
+    <div class="flex items-start gap-4">
+      <!-- Score badge -->
+      <div class="flex-shrink-0 w-14 h-14 rounded-lg border-2 flex flex-col items-center justify-center
+                  score-{{ listing.score_color }}">
+        <span class="text-xl font-bold leading-none">{{ listing.match_score if listing.match_score is not none else '?' }}</span>
+        <span class="text-[10px] mt-0.5">/10</span>
+      </div>
+
+      <!-- Info -->
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h3 class="font-semibold text-gray-900 truncate">{{ listing.title or 'Untitled' }}</h3>
+          <span class="text-xs px-2 py-0.5 rounded bg-gray-100 text-gray-500">{{ listing.source }}</span>
+          {% if listing.feedback %}
+          <span class="text-xs px-2 py-0.5 rounded
+            {{ 'bg-green-100 text-green-700' if listing.feedback == 'good_match' else 'bg-red-100 text-red-700' }}">
+            {{ listing.feedback | replace('_', ' ') }}
+          </span>
+          {% endif %}
+        </div>
+
+        <div class="flex items-center gap-4 mt-1 text-sm text-gray-500">
+          {% if listing.price %}
+          <span class="font-medium text-gray-900">${{ '{:,}'.format(listing.price) }}/mo</span>
+          {% endif %}
+          {% if listing.bedrooms %}
+          <span>{{ listing.bedrooms | int }}bd</span>
+          {% endif %}
+          {% if listing.bathrooms %}
+          <span>{{ listing.bathrooms | int }}ba</span>
+          {% endif %}
+          {% if listing.sqft %}
+          <span>{{ '{:,}'.format(listing.sqft) }}sqft</span>
+          {% endif %}
+          {% if listing.neighborhood %}
+          <span>{{ listing.neighborhood }}</span>
+          {% endif %}
+        </div>
+
+        {% if listing.summary %}
+        <p class="text-sm text-gray-600 mt-1 truncate">{{ listing.summary }}</p>
+        {% endif %}
+
+        {% if listing.availability_date and listing.availability_date != 'unknown' %}
+        <div class="mt-1">
+          <span class="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-700">
+            Available: {{ listing.availability_date }}
+          </span>
+        </div>
+        {% endif %}
+      </div>
+
+      <!-- Arrow -->
+      <div class="flex-shrink-0 text-gray-300 self-center">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+      </div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}

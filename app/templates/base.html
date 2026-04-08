@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Rental Scout{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    .score-green { background: #dcfce7; border-color: #16a34a; color: #15803d; }
+    .score-yellow { background: #fef9c3; border-color: #ca8a04; color: #a16207; }
+    .score-red { background: #fee2e2; border-color: #dc2626; color: #b91c1c; }
+    .score-gray { background: #f3f4f6; border-color: #9ca3af; color: #6b7280; }
+    .feedback-btn { transition: all 0.15s; }
+    .feedback-btn:hover { transform: scale(1.05); }
+    .feedback-btn.active { ring: 2px; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <nav class="bg-white border-b border-gray-200 px-6 py-4">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <a href="/" class="text-xl font-bold text-gray-900">Rental Scout</a>
+      <div class="flex items-center gap-4 text-sm text-gray-500">
+        {% if last_run %}
+          <span>Last run: {{ last_run.completed_at.strftime('%b %d, %I:%M %p') if last_run.completed_at else 'running...' }}</span>
+          {% if last_run.matches_found is not none %}
+            <span class="text-green-600 font-medium">{{ last_run.matches_found }} matches</span>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </nav>
+
+  <main class="max-w-7xl mx-auto px-6 py-6">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
