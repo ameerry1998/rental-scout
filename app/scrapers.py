@@ -373,6 +373,79 @@ def _transform_facebook(item: dict) -> ScraperResult | None:
     )
 
 
+def enrich_facebook_details(results: list[ScraperResult]) -> list[ScraperResult]:
+    """Fetch full listing details for Facebook listings via Apify detail scrape.
+    Only called for listings that passed the pre-filter (~16 out of 200).
+    Costs ~$0.005 per listing detail."""
+    urls = [r.url for r in results if r.url]
+    if not urls:
+        return results
+
+    log.info(f"Facebook: fetching full details for {len(urls)} filtered listings (~${len(urls) * 0.005:.2f})")
+    client = ApifyClient(config.APIFY_API_TOKEN)
+
+    try:
+        run = client.actor(config.FACEBOOK_ACTOR).call(
+            run_input={
+                "startUrls": [{"url": u} for u in urls],
+                "maxItems": len(urls),
+            },
+            timeout_secs=300,
+        )
+        detail_items = client.dataset(run["defaultDatasetId"]).list_items().items
+        log.info(f"Facebook: got {len(detail_items)} detail pages")
+
+        # Build lookup by listing ID
+        details_by_id = {}
+        for item in detail_items:
+            lid = item.get("id", "")
+            if lid:
+                details_by_id[lid] = item
+
+        # Enrich each result with the full detail data
+        for result in results:
+            detail = details_by_id.get(result.source_id)
+            if not detail:
+                continue
+
+            # Full description text
+            desc_data = detail.get("description", {}) or {}
+            if isinstance(desc_data, dict):
+                desc_text = desc_data.get("text", "")
+            else:
+                desc_text = str(desc_data)
+            if desc_text:
+                result.description = desc_text
+
+            # Better title
+            result.title = detail.get("listingTitle") or result.title
+
+            # Location
+            location = detail.get("location", {}) or {}
+            reverse = location.get("reverse_geocode", {}) or {}
+            city = reverse.get("city", "")
+            if city:
+                result.neighborhood = f"{city}, {reverse.get('state', '')}"
+
+            # Photos
+            photos = detail.get("listingPhotos") or []
+            result.images = [
+                p.get("image", {}).get("uri", "")
+                for p in photos if p.get("image", {}).get("uri")
+            ][:6]
+
+            # Details (beds, baths, etc. from the detail page)
+            details_list = detail.get("details") or []
+            if details_list:
+                result.description += "\n\nDetails: " + " | ".join(str(d) for d in details_list)
+
+        log.info(f"Facebook: enriched {len(details_by_id)} listings with full descriptions")
+    except Exception as e:
+        log.warning(f"Facebook detail enrichment failed: {e}")
+
+    return results
+
+
 def _transform_rent(item: dict) -> ScraperResult | None:
     # benthepythondev/rent-com-scraper output shape
     prop_id = item.get("id") or item.get("propertyId") or ""
