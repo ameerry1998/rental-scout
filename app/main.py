@@ -15,7 +15,7 @@ from app import config
 from app.db import get_db, init_db
 from app.matcher import draft_message, score_and_update, score_and_update_batch, get_match_prompt, save_match_prompt
 from app.models import Listing, SearchRun, ActivityLog
-from app.scrapers import ScraperResult, run_single_scraper, trigger_new_scrape, enrich_facebook_details, SCRAPER_NAMES
+from app.scrapers import ScraperResult, run_single_scraper, trigger_new_scrape, enrich_facebook_details, enrich_zillow_details, SCRAPER_NAMES
 
 # Lock to prevent duplicate concurrent runs
 _running_jobs: set[str] = set()
@@ -142,9 +142,11 @@ def _run_source(source: str, db: Session) -> dict:
         rejected = total - len(filtered)
         log.info(f"[{source}] Pre-filter: {total} new → {len(filtered)} passed, {rejected} rejected")
 
-        # Fetch full listing details for Facebook (only for filtered listings)
+        # Fetch full listing details for platforms with thin data
         if source == "facebook" and filtered:
             filtered = enrich_facebook_details(filtered)
+        elif source == "zillow" and filtered:
+            filtered = enrich_zillow_details(filtered)
 
         new_listings: list[Listing] = []
         for r in filtered:

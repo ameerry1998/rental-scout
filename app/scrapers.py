@@ -373,6 +373,67 @@ def _transform_facebook(item: dict) -> ScraperResult | None:
     )
 
 
+def enrich_zillow_details(results: list[ScraperResult]) -> list[ScraperResult]:
+    """Fetch full listing details for Zillow listings via maxcopell/zillow-detail-scraper.
+    Only called for listings that passed the pre-filter. ~$0.01 per listing."""
+    urls = [r.url for r in results if r.url and "zillow.com" in r.url]
+    if not urls:
+        return results
+
+    log.info(f"Zillow: fetching full details for {len(urls)} filtered listings")
+    client = ApifyClient(config.APIFY_API_TOKEN)
+
+    try:
+        run = client.actor("maxcopell/zillow-detail-scraper").call(
+            run_input={"startUrls": [{"url": u} for u in urls], "maxItems": len(urls)},
+            timeout_secs=300,
+        )
+        detail_items = client.dataset(run["defaultDatasetId"]).list_items().items
+        log.info(f"Zillow: got {len(detail_items)} detail pages")
+
+        # Build lookup by address (zpid isn't always in detail output)
+        details_by_address = {}
+        for item in detail_items:
+            addr = item.get("streetAddress") or item.get("address", {}).get("streetAddress", "")
+            if addr:
+                details_by_address[addr.lower().strip()] = item
+
+        for result in results:
+            addr_key = (result.address or "").lower().strip()
+            detail = details_by_address.get(addr_key)
+            if not detail:
+                # Try matching by URL
+                for item in detail_items:
+                    if result.url and result.url in str(item.get("url", "")):
+                        detail = item
+                        break
+            if not detail:
+                continue
+
+            desc = detail.get("description") or ""
+            if desc:
+                result.description = desc
+
+            # Contact info
+            broker = detail.get("brokerName") or detail.get("buildingName") or ""
+            phone = detail.get("phone") or detail.get("brokerPhone") or ""
+            if broker or phone:
+                result.contact_info = ", ".join(filter(None, [broker, phone]))
+
+            # Better photos
+            photos = detail.get("photos") or detail.get("responsivePhotos") or []
+            if photos and isinstance(photos[0], dict):
+                result.images = [p.get("url") or p.get("mixedSources", {}).get("jpeg", [{}])[0].get("url", "") for p in photos[:6]]
+            elif photos and isinstance(photos[0], str):
+                result.images = photos[:6]
+
+        log.info(f"Zillow: enriched {len(details_by_address)} listings with full descriptions")
+    except Exception as e:
+        log.warning(f"Zillow detail enrichment failed: {e}")
+
+    return results
+
+
 def enrich_facebook_details(results: list[ScraperResult]) -> list[ScraperResult]:
     """Fetch full listing details for Facebook listings via Apify detail scrape.
     Only called for listings that passed the pre-filter (~16 out of 200).
