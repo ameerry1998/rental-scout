@@ -535,8 +535,22 @@ def _transform_rent(item: dict) -> ScraperResult | None:
 # ---------------------------------------------------------------------------
 
 def _zillow_input() -> dict:
+    # Price filter baked into the URL search query state
     return {
-        "startUrls": [{"url": f"https://www.zillow.com/cambridge-ma/rentals/{config.BEDROOMS}-_beds/"}],
+        "startUrls": [{"url": (
+            f"https://www.zillow.com/cambridge-ma/rentals/"
+            f"{config.BEDROOMS}-_beds/"
+            f"?searchQueryState=%7B%22filterState%22%3A%7B"
+            f"%22price%22%3A%7B%22max%22%3A{config.MAX_PRICE}%7D%2C"
+            f"%22beds%22%3A%7B%22min%22%3A{config.BEDROOMS}%2C%22max%22%3A{config.BEDROOMS}%7D%2C"
+            f"%22fr%22%3A%7B%22value%22%3Atrue%7D%2C"
+            f"%22fsba%22%3A%7B%22value%22%3Afalse%7D%2C"
+            f"%22fsbo%22%3A%7B%22value%22%3Afalse%7D%2C"
+            f"%22nc%22%3A%7B%22value%22%3Afalse%7D%2C"
+            f"%22cmsn%22%3A%7B%22value%22%3Afalse%7D%2C"
+            f"%22auc%22%3A%7B%22value%22%3Afalse%7D%2C"
+            f"%22fore%22%3A%7B%22value%22%3Afalse%7D%7D%7D"
+        )}],
         "maxItems": 200,
     }
 
@@ -546,6 +560,9 @@ def _apartments_input() -> dict:
         "providers": ["zumper", "apartments"],
         "location": "Cambridge, MA",
         "listingType": "rent",
+        "minBeds": config.BEDROOMS,
+        "maxBeds": config.BEDROOMS,
+        "maxPrice": config.MAX_PRICE,
         "maxItems": 200,
     }
 
@@ -558,9 +575,14 @@ def _realtor_input() -> dict:
 
 
 def _facebook_input() -> dict:
+    # Search Cambridge specifically, with price and bed count in query
     return {
-        "startUrls": [{"url": f"https://www.facebook.com/marketplace/boston/propertyrentals?minPrice=0&maxPrice={config.MAX_PRICE}"}],
-        "maxItems": 100,
+        "startUrls": [{"url": (
+            f"https://www.facebook.com/marketplace/cambridge-ma/propertyrentals"
+            f"?minPrice=0&maxPrice={config.MAX_PRICE}"
+            f"&minBedrooms={config.BEDROOMS}&maxBedrooms={config.BEDROOMS}"
+        )}],
+        "maxItems": 200,
     }
 
 
