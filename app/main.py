@@ -388,6 +388,45 @@ def trigger_all_run(
 
 
 # ---------------------------------------------------------------------------
+# Routes — Re-import a source (wipe + re-fetch with current code)
+# ---------------------------------------------------------------------------
+
+@app.post("/reimport/{source}")
+def trigger_reimport(
+    source: str,
+    background_tasks: BackgroundTasks,
+    secret: str = Query(...),
+):
+    """Delete all listings from a source and re-import fresh. Use when the scraper code changed."""
+    if secret != config.CRON_SECRET:
+        raise HTTPException(403, "Invalid secret")
+    if source not in SCRAPER_NAMES:
+        raise HTTPException(404, f"Unknown source: {source}")
+
+    job_key = f"reimport:{source}"
+    with _jobs_lock:
+        if job_key in _running_jobs:
+            return {"status": "already_running"}
+        _running_jobs.add(job_key)
+
+    def _bg():
+        from app.db import SessionLocal
+        session = SessionLocal()
+        try:
+            deleted = session.query(Listing).filter(Listing.source == source).delete()
+            session.commit()
+            log.info(f"[{source}] Deleted {deleted} old listings, re-importing fresh")
+            _run_source(source, session)
+        finally:
+            session.close()
+            with _jobs_lock:
+                _running_jobs.discard(job_key)
+
+    background_tasks.add_task(_bg)
+    return {"status": "started", "source": source, "message": f"Wiping {source} listings and re-importing"}
+
+
+# ---------------------------------------------------------------------------
 # Routes — Score unscored + Re-score all
 # ---------------------------------------------------------------------------
 
