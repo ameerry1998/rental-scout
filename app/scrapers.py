@@ -575,18 +575,27 @@ def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[S
 
     # Pull from the most recent successful run's dataset.
     # NEVER starts a new Apify run — use "New Scrape" for that.
+    # NOTE: stats.itemCount can be 0 even when the dataset has data (Apify outage bug).
+    # So we check the actual dataset contents instead of trusting the stats.
     dataset_id = None
     try:
         recent_runs = client.actor(scraper.actor_id).runs().list(limit=10).items
         log.info(f"  {source}: checking {len(recent_runs)} recent runs")
         for recent in recent_runs:
             status = recent.get("status")
-            item_count = recent.get("stats", {}).get("itemCount", 0)
-            log.info(f"    run {recent.get('id','?')[:12]}: status={status}, items={item_count}")
-            if status == "SUCCEEDED" and item_count > 0:
-                dataset_id = recent.get("defaultDatasetId")
-                log.info(f"  {source}: importing {item_count} items from existing run")
+            if status not in ("SUCCEEDED", "TIMED-OUT"):
+                continue
+            ds_id = recent.get("defaultDatasetId")
+            if not ds_id:
+                continue
+            # Actually check if the dataset has items
+            sample = client.dataset(ds_id).list_items(limit=1).items
+            if sample:
+                dataset_id = ds_id
+                log.info(f"  {source}: found dataset {ds_id[:12]} with data, importing")
                 break
+            else:
+                log.info(f"    run {recent.get('id','?')[:12]}: dataset empty")
     except Exception as e:
         log.warning(f"  {source}: couldn't check recent runs: {e}")
 
