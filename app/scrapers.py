@@ -762,10 +762,8 @@ def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[S
 
     client = ApifyClient(config.APIFY_API_TOKEN)
 
-    # Pull from the most recent successful run's dataset.
-    # NEVER starts a new Apify run — use "New Scrape" for that.
-    # NOTE: stats.itemCount can be 0 even when the dataset has data (Apify outage bug).
-    # So we check the actual dataset contents instead of trusting the stats.
+    # Try to import from an existing dataset first. If everything's already imported,
+    # trigger a fresh run and wait for it.
     dataset_id = None
     try:
         recent_runs = client.actor(scraper.actor_id).runs().list(limit=10).items
@@ -777,20 +775,29 @@ def run_single_scraper(source: str, known_ids: set[str] | None = None) -> list[S
             ds_id = recent.get("defaultDatasetId")
             if not ds_id:
                 continue
-            # Actually check if the dataset has items
             sample = client.dataset(ds_id).list_items(limit=1).items
             if sample:
                 dataset_id = ds_id
-                log.info(f"  {source}: found dataset {ds_id[:12]} with data, importing")
+                log.info(f"  {source}: found dataset {ds_id[:12]} with data")
                 break
             else:
                 log.info(f"    run {recent.get('id','?')[:12]}: dataset empty")
     except Exception as e:
         log.warning(f"  {source}: couldn't check recent runs: {e}")
 
+    if dataset_id:
+        # Check if this dataset has any NEW items we haven't imported yet
+        dataset_items = client.dataset(dataset_id).list_items().items
+        new_count = sum(1 for item in dataset_items if scraper.transform(item) and scraper.transform(item).source_id not in known_ids)
+        if new_count == 0:
+            log.info(f"  {source}: existing dataset fully imported. Starting fresh run...")
+            dataset_id = None
+
     if not dataset_id:
-        log.info(f"  {source}: no existing runs with data found. Use 'New Scrape' to trigger one.")
-        return []
+        log.info(f"  {source}: triggering new Apify run (actor: {scraper.actor_id})")
+        actor_input = scraper.build_input()
+        run = client.actor(scraper.actor_id).call(run_input=actor_input, timeout_secs=600)
+        dataset_id = run["defaultDatasetId"]
 
     dataset_items = client.dataset(dataset_id).list_items().items
 
