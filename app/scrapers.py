@@ -607,20 +607,37 @@ SCRAPER_NAMES: list[str] = DIRECT_SCRAPERS + list(APIFY_SCRAPERS.keys())
 # ---------------------------------------------------------------------------
 
 def _scrape_bostonpads(known_ids: set[str] | None = None) -> list[ScraperResult]:
-    """Scrape BostonPads Cambridge 1BR listings directly."""
+    """Scrape BostonPads Cambridge listings with proper filters and pagination."""
     known_ids = known_ids or set()
-    search_url = f"https://bostonpads.com/cambridge-ma-apartments/?beds={config.BEDROOMS}&maxprice={config.MAX_PRICE}"
+    base_url = f"https://bostonpads.com/cambridge-ma-apartments/?bdsl={config.BEDROOMS}&price_to={config.MAX_PRICE}"
 
-    log.info(f"BostonPads: fetching {search_url}")
-    r = httpx.get(search_url, follow_redirects=True, headers=HEADERS, timeout=30)
-    r.raise_for_status()
+    all_cards = []
+    page = 1
+    while True:
+        url = f"{base_url}&page={page}" if page > 1 else base_url
+        log.info(f"BostonPads: fetching page {page}")
+        r = httpx.get(url, follow_redirects=True, headers=HEADERS, timeout=30)
+        r.raise_for_status()
 
-    soup = BeautifulSoup(r.text, "html.parser")
-    cards = soup.select(".bpo-listing-block-outer")
-    log.info(f"BostonPads: found {len(cards)} listing cards")
+        soup = BeautifulSoup(r.text, "html.parser")
+        cards = soup.select(".bpo-listing-block-outer")
+        if not cards:
+            break
+        all_cards.extend(cards)
+        log.info(f"  Page {page}: {len(cards)} cards (total so far: {len(all_cards)})")
+
+        # Check if there's a next page
+        last_page_el = soup.select_one(".pagination [data-page]:last-of-type")
+        last_page_num = int(last_page_el.get("data-page", page)) if last_page_el else page
+        if page >= last_page_num:
+            break
+        page += 1
+        time.sleep(0.5)
+
+    log.info(f"BostonPads: found {len(all_cards)} total listing cards across {page} pages")
 
     results: list[ScraperResult] = []
-    for card in cards:
+    for card in all_cards:
         try:
             link = card.select_one("a[href*='cambridge-ma-apartments/cambridge-']")
             if not link:
