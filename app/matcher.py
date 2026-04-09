@@ -244,9 +244,6 @@ def score_and_update(listing: Listing, db: Session) -> None:
     result = results[0] if results else _default_result(listing)
     _apply_result(listing, result)
 
-    if listing.match_score >= 7 and not listing.is_room_share:
-        listing.draft_message = draft_message(listing)
-
     db.commit()
 
 
@@ -272,7 +269,6 @@ def score_and_update_batch(listings: list[Listing], db: Session, batch_size: int
                     _apply_result(listing, _default_result(listing))
 
                 if listing.match_score >= 7 and not listing.is_room_share:
-                    listing.draft_message = draft_message(listing)
                     matches += 1
 
             db.commit()
