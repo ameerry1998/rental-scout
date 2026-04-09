@@ -211,7 +211,7 @@ def draft_message(listing: Listing) -> str:
     listing_text = _build_listing_text(listing)
     try:
         response = client.messages.create(
-            model="claude-sonnet-4-5-20241022",
+            model="claude-haiku-4-5-20251001",
             max_tokens=400,
             system=DRAFT_SYSTEM,
             messages=[{"role": "user", "content": f"LISTING:\n{listing_text}"}],

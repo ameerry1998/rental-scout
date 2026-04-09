@@ -656,19 +656,35 @@ def _scrape_bostonpads(known_ids: set[str] | None = None) -> list[ScraperResult]
             avail_m = re.search(r"Available:?\s*([\d-]+)", text)
             beds_m = re.search(r"(\d+)\s*Beds?", text)
             baths_m = re.search(r"(\d+)\s*Baths?", text)
-            loc_m = re.search(r"at\s+(.+?),\s*(Cambridge|Somerville)", text)
 
-            neighborhood = loc_m.group(1).strip() + ", " + loc_m.group(2) if loc_m else "Cambridge"
+            # Try multiple patterns for neighborhood
+            loc_m = re.search(r"at\s+(.{3,40}?),\s*(Cambridge|Somerville)", text)
+            if not loc_m:
+                loc_m = re.search(r"([\w\s/]+),\s*(Cambridge|Somerville),\s*MA", text)
+
+            if loc_m:
+                neighborhood = loc_m.group(1).strip()[:60] + ", " + loc_m.group(2)
+            else:
+                neighborhood = "Cambridge"
+
+            # Extract address if present
+            addr_m = re.search(r"(\d+[\w\s.-]+(?:Street|St|Ave|Avenue|Road|Rd|Drive|Dr|Place|Pl|Way|Ct|Court))", text)
+            address = addr_m.group(1).strip()[:120] if addr_m else ""
+
+            title = f"{neighborhood} - {beds_m.group(1) if beds_m else '1'}BR"
+            if address:
+                title = f"{address}, {neighborhood}"
 
             results.append(ScraperResult(
                 source="bostonpads",
                 source_id=listing_id,
                 url=url,
-                title=f"{neighborhood} - {beds_m.group(1) if beds_m else '1'}BR" if loc_m else f"Cambridge listing {listing_id}",
+                title=title[:250],
                 price=_safe_int(price_m.group(1).replace(",", "")) if price_m else None,
                 bedrooms=_safe_float(beds_m.group(1)) if beds_m else None,
                 bathrooms=_safe_float(baths_m.group(1)) if baths_m else None,
-                neighborhood=neighborhood,
+                address=address,
+                neighborhood=neighborhood[:250],
                 description=text[:1000],
                 raw_data={"url": url, "card_text": text[:500]},
             ))

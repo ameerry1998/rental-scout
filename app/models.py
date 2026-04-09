@@ -22,7 +22,7 @@ class Listing(Base):
     bathrooms = Column(Float)
     sqft = Column(Integer)
     address = Column(Text)
-    neighborhood = Column(String(255))
+    neighborhood = Column(Text)
     latitude = Column(Float)
     longitude = Column(Float)
     description = Column(Text)
